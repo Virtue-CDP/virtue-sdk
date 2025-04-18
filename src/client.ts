@@ -4,25 +4,22 @@ import {
   TransactionResult,
 } from "@iota/iota-sdk/transactions";
 import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
-import { bcs } from "@iota/iota-sdk/bcs";
+// import { bcs } from "@iota/iota-sdk/bcs";
 
+import { VaultInfo, VaultResponse, COLLATERAL_COIN, Position } from "./types";
+import { getObjectFields, getPriceResultType } from "./utils";
 import {
-  BUCKET_OPERATIONS_PACKAGE_ID,
-  CLOCK_OBJECT,
+  CDP_PACKAGE_ID,
+  CDP_VERSION_OBJ,
+  CLOCK_OBJ,
   COINS_TYPE_LIST,
-  CONTRIBUTOR_TOKEN_ID,
-  CORE_PACKAGE_ID,
-  ORACLE_OBJECT,
-  PROTOCOL_ID,
-  PROTOCOL_OBJECT,
+  FRAMEWORK_PACKAGE_ID,
+  ORACLE_PACKAGE_ID,
+  TESTNET_PRICE_FEED_OBJ,
+  TESTNET_PRICE_PACKAGE_ID,
+  TREASURY_OBJ,
+  VAULT_MAP,
 } from "./constants";
-import {
-  BucketInfo,
-  BucketProtocolResponse,
-  BucketResponse,
-  COIN,
-} from "./types";
-import { getObjectFields } from "./utils";
 
 const DUMMY_ADDRESS = "0x0";
 
@@ -59,186 +56,182 @@ export class VirtueClient {
 
   // Query
   /**
-   * @description Get bucket object from coin
+   * @description Get Vault<token> object
    */
-  async getBucket(token: COIN): Promise<BucketInfo> {
-    const generalInfo = await this.client.getObject({
-      id: PROTOCOL_ID,
+  async getVaultInfo(coinSymbol: COLLATERAL_COIN): Promise<VaultInfo> {
+    const vault = VAULT_MAP[coinSymbol];
+    const res = await this.client.getObject({
+      id: vault.vault.objectId,
       options: {
         showContent: true,
       },
     });
-    const generalInfoField = generalInfo.data
-      ?.content as BucketProtocolResponse;
-    const minBottleSize = generalInfoField.fields.min_bottle_size;
+    const fields = getObjectFields(res) as VaultResponse;
 
-    const coinType = COINS_TYPE_LIST[token];
-    const res = await this.client.getDynamicFieldObject({
-      parentId: PROTOCOL_ID,
-      name: {
-        type: `${CONTRIBUTOR_TOKEN_ID}::buck::BucketType<${coinType}>`,
-        value: {
-          dummy_field: false,
-        },
-      },
-    });
-    const fields = getObjectFields(res) as BucketResponse;
-
-    const bucketInfo: BucketInfo = {
-      token,
-      baseFeeRate: Number(fields.base_fee_rate ?? 5_000),
-      bottleTableSize: fields.bottle_table.fields.table.fields.size ?? "",
-      bottleTableId: fields.bottle_table.fields.table.fields.id.id ?? "",
-      collateralDecimal: fields.collateral_decimal ?? 0,
-      collateralVault: fields.collateral_vault ?? "",
-      latestRedemptionTime: Number(fields.latest_redemption_time ?? 0),
-      minCollateralRatio: fields.min_collateral_ratio ?? "",
-      mintedBuckAmount: fields.minted_buck_amount ?? "",
-      maxMintAmount: fields.max_mint_amount ?? "",
-      recoveryModeThreshold: fields.recovery_mode_threshold ?? "",
-      minBottleSize,
+    const vaultInfo: VaultInfo = {
+      token: coinSymbol,
+      baseFeeRate:
+        Number(fields.position_table.fields.fee_rate ?? 3_000_000) / 10 ** 9,
+      bottleTableSize: fields.position_table.fields.table.fields.size,
+      bottleTableId: fields.position_table.fields.table.fields.id.id,
+      collateralDecimal: Number(fields.decimal),
+      collateralVault: fields.balance,
+      latestRedemptionTime: Number(fields.position_table.fields.timestamp),
+      minCollateralRatio: fields.liquidation_config.fields.mcr.fields.value,
+      mintedBuckAmount: fields.limited_supply.fields.supply,
+      maxMintAmount: fields.limited_supply.fields.limit,
+      recoveryModeThreshold: fields.liquidation_config.fields.ccr.fields.value,
+      minBottleSize: fields.min_debt_amount,
     };
 
-    return bucketInfo;
+    return vaultInfo;
   }
 
-  // MoveCall
+  async getPosition(
+    debtor: string,
+    coinSymbol: COLLATERAL_COIN,
+  ): Promise<Position | undefined> {
+    const vaultInfo = await this.getVaultInfo(coinSymbol);
+    const tableId = vaultInfo.bottleTableId;
+    const positionRes = await this.client.getDynamicFieldObject({
+      parentId: tableId,
+      name: {
+        type: "address",
+        value: debtor,
+      },
+    });
+    const positionData = getObjectFields(positionRes);
+    if (!positionData) return;
+    positionData;
+    return {
+      collAmount: positionData.coll_amount,
+      debtAmount: positionData.debt_amount,
+    };
+  }
+
   /**
-   * @description update token price using supra oracle
-   * @param assetType Asset , e.g "0x2::iota::IOTA"
+   * @description Create a price collector
+   * @param collateral coin symbol, e.g "IOTA"
    */
-  updateSupraOracle(tx: Transaction, coin: COIN) {
+  newPriceCollector(
+    tx: Transaction,
+    coinSymbol: COLLATERAL_COIN,
+  ): TransactionResult {
+    return tx.moveCall({
+      target: `${ORACLE_PACKAGE_ID}::collector::new`,
+      typeArguments: [COINS_TYPE_LIST[coinSymbol]],
+    });
+  }
+
+  /**
+   * @description Get a price result
+   * @param collateral coin symbol, e.g "IOTA"
+   */
+  aggregatePrice(
+    tx: Transaction,
+    coinSymbol: COLLATERAL_COIN,
+  ): TransactionResult {
+    const [collector] = this.newPriceCollector(tx, coinSymbol);
+    const coinType = COINS_TYPE_LIST[coinSymbol];
+    // TODO: testnet only
     tx.moveCall({
-      target:
-        "0x915d11320f37ddb386367dbce81154e1b4cf83e6a3039df183ac4ae78131c786::ssui_rule::update_price",
-      typeArguments: [COINS_TYPE_LIST[coin]],
+      target: `${TESTNET_PRICE_PACKAGE_ID}::testnet_price::feed_price`,
+      typeArguments: [coinType],
+      arguments: [tx.sharedObjectRef(TESTNET_PRICE_FEED_OBJ), collector],
+    });
+
+    // aggregate
+    const aggregater = tx.sharedObjectRef(
+      VAULT_MAP[coinSymbol].priceAggregater,
+    );
+    return tx.moveCall({
+      target: `${ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+      typeArguments: [coinType],
+      arguments: [aggregater, collector],
+    });
+  }
+
+  /**
+   * @description Get a request to Mange Position
+   * @param tx
+   * @param collateral coin symbol , e.g "IOTA"
+   * @param collateral input coin
+   * @param the amount to borrow
+   * @param repyment input coin (always VUSD)
+   * @param the amount to withdraw
+   * @returns ManageRequest
+   */
+  requestManagePosition(
+    tx: Transaction,
+    coinSymbol: COLLATERAL_COIN,
+    depositCoin: TransactionArgument,
+    borrowAmount: string,
+    repaymentCoin: TransactionArgument,
+    withdrawAmount: string,
+    accountObj?: string | TransactionArgument,
+  ) {
+    const coinType = COINS_TYPE_LIST[coinSymbol];
+    const [accountReq] = accountObj
+      ? tx.moveCall({
+          target: `${FRAMEWORK_PACKAGE_ID}::account::request_with_account`,
+          arguments: [
+            typeof accountObj === "string" ? tx.object(accountObj) : accountObj,
+          ],
+        })
+      : tx.moveCall({
+          target: `${FRAMEWORK_PACKAGE_ID}::account::request`,
+        });
+    return tx.moveCall({
+      target: `${CDP_PACKAGE_ID}::manager::request`,
+      typeArguments: [coinType],
       arguments: [
-        tx.sharedObjectRef(ORACLE_OBJECT),
-        tx.sharedObjectRef(CLOCK_OBJECT),
-        tx.object(
-          "0xbca474133638352ba83ccf7b5c931d50f764b09550e16612c9f70f1e21f3f594",
-        ),
+        tx.sharedObjectRef(CDP_VERSION_OBJ),
+        accountReq,
+        depositCoin,
+        tx.pure.u64(borrowAmount),
+        repaymentCoin,
+        tx.pure.u64(withdrawAmount),
       ],
     });
   }
 
   /**
-   * @description Borrow
+   * @description Manage Position
    * @param tx
-   * @param collateralType Asset , e.g "0x2::iota::IOTA"
-   * @param collateralInput collateral input
-   * @param buckOutput
-   * @param insertionPlace optional
-   * @returns TransactionResult
+   * @param collateral coin symbol , e.g "IOTA"
+   * @param manager request, see this.requestManagePosition
+   * @param price result, see this.getPriceResult
+   * @param the position place to insert
+   * @returns [Coin<T>, COIN<VUSD>]
    */
-  borrow(
+  managePosition(
     tx: Transaction,
-    collateralType: string,
-    collateralInput: TransactionResult,
-    buckOutput: string | TransactionArgument,
+    coinSymbol: COLLATERAL_COIN,
+    manageRequest: TransactionArgument,
+    priceResult?: TransactionArgument,
     insertionPlace?: string,
-    strapId?: string | TransactionArgument,
-  ): TransactionResult | null {
-    if (strapId) {
-      if (strapId === "new") {
-        const [strap] = tx.moveCall({
-          target: `${CORE_PACKAGE_ID}::strap::new`,
-          typeArguments: [collateralType],
+  ): TransactionResult {
+    const vault = VAULT_MAP[coinSymbol].vault;
+    const priceResultOpt = priceResult
+      ? tx.moveCall({
+          target: `0x2::option::some`,
+          typeArguments: [getPriceResultType(coinSymbol)],
+        })
+      : tx.moveCall({
+          target: `0x2::option::none`,
+          typeArguments: [getPriceResultType(coinSymbol)],
         });
-        if (strap) {
-          const [buckOut] = tx.moveCall({
-            target: `${BUCKET_OPERATIONS_PACKAGE_ID}::bucket_operations::high_borrow_with_strap`,
-            typeArguments: [collateralType],
-            arguments: [
-              tx.sharedObjectRef(PROTOCOL_OBJECT),
-              tx.sharedObjectRef(ORACLE_OBJECT),
-              strap,
-              tx.sharedObjectRef(CLOCK_OBJECT),
-              collateralInput,
-              typeof buckOutput === "string"
-                ? tx.pure.u64(buckOutput)
-                : buckOutput,
-              tx.pure(
-                bcs
-                  .vector(bcs.Address)
-                  .serialize(insertionPlace ? [insertionPlace] : []),
-              ),
-            ],
-          });
-          return [strap, buckOut] as TransactionResult;
-        }
-      } else {
-        return tx.moveCall({
-          target: `${BUCKET_OPERATIONS_PACKAGE_ID}::bucket_operations::high_borrow_with_strap`,
-          typeArguments: [collateralType],
-          arguments: [
-            tx.sharedObjectRef(PROTOCOL_OBJECT),
-            tx.sharedObjectRef(ORACLE_OBJECT),
-            typeof strapId === "string" ? tx.object(strapId) : strapId,
-            tx.sharedObjectRef(CLOCK_OBJECT),
-            collateralInput,
-            typeof buckOutput === "string"
-              ? tx.pure.u64(buckOutput)
-              : buckOutput,
-            tx.pure(
-              bcs
-                .vector(bcs.Address)
-                .serialize(insertionPlace ? [insertionPlace] : []),
-            ),
-          ],
-        });
-      }
-    } else {
-      return tx.moveCall({
-        target: `${BUCKET_OPERATIONS_PACKAGE_ID}::bucket_operations::high_borrow`,
-        typeArguments: [collateralType],
-        arguments: [
-          tx.sharedObjectRef(PROTOCOL_OBJECT),
-          tx.sharedObjectRef(ORACLE_OBJECT),
-          tx.sharedObjectRef(CLOCK_OBJECT),
-          collateralInput,
-          typeof buckOutput === "string" ? tx.pure.u64(buckOutput) : buckOutput,
-          tx.pure(
-            bcs
-              .vector(bcs.Address)
-              .serialize(insertionPlace ? [insertionPlace] : []),
-          ),
-        ],
-      });
-    }
-
-    return null;
-  }
-
-  /**
-   * @description Top up function
-   * @param tx
-   * @param collateralType Asset , e.g "0x2::iota::IOTA"
-   * @param collateralInput collateral input
-   * @param forAddress
-   * @param insertionPlace optional
-   * @returns TransactionResult
-   */
-  topUp(
-    tx: Transaction,
-    collateralType: string,
-    collateralInput: TransactionResult,
-    forAddress: string,
-    insertionPlace?: string,
-  ) {
-    tx.moveCall({
-      target: `${BUCKET_OPERATIONS_PACKAGE_ID}::bucket_operations::high_top_up`,
-      typeArguments: [collateralType],
+    return tx.moveCall({
+      target: `${CDP_PACKAGE_ID}::vault::manage_position`,
+      typeArguments: [COINS_TYPE_LIST[coinSymbol]],
       arguments: [
-        tx.sharedObjectRef(PROTOCOL_OBJECT),
-        collateralInput,
-        tx.pure.address(forAddress),
-        tx.pure(
-          bcs
-            .vector(bcs.Address)
-            .serialize(insertionPlace ? [insertionPlace] : []),
-        ),
-        tx.sharedObjectRef(CLOCK_OBJECT),
+        tx.sharedObjectRef(vault),
+        tx.sharedObjectRef(CDP_VERSION_OBJ),
+        tx.sharedObjectRef(TREASURY_OBJ),
+        tx.sharedObjectRef(CLOCK_OBJ),
+        priceResultOpt,
+        manageRequest,
+        tx.pure.option("address", insertionPlace),
       ],
     });
   }

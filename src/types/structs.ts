@@ -1,7 +1,7 @@
-import { COIN } from "./coin";
+import { COLLATERAL_COIN } from "./coin";
 
-export type BucketInfo = {
-  token: COIN;
+export type VaultInfo = {
+  token: COLLATERAL_COIN;
   baseFeeRate: number;
   bottleTableSize: string;
   bottleTableId: string;
@@ -15,4 +15,9 @@ export type BucketInfo = {
   recoveryModeThreshold: string;
 };
 
-export type BucketList = Partial<Record<COIN, BucketInfo>>;
+export type Position = {
+  collAmount: string;
+  debtAmount: string;
+};
+
+export type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;

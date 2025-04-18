@@ -1,71 +1,58 @@
 import { Transaction } from "@iota/iota-sdk/transactions";
-import {
-  coinFromBalance,
-  coinIntoBalance,
-  getCoinSymbol,
-  getInputCoins,
-} from "./utils";
+import { getInputCoins } from "./utils";
 import { VirtueClient } from "./client";
 import { COINS_TYPE_LIST } from "./constants";
+import { COLLATERAL_COIN } from "./types";
 
-/* ----- Borrow/Repay Builders ----- */
-export async function buildBorrowTx(
+/* ----- Manage Position Builder ----- */
+export async function buildManagePositionTx(
   client: VirtueClient,
   tx: Transaction,
-  collateralType: string,
+  sender: string,
+  collateralSymbol: COLLATERAL_COIN,
   collateralAmount: string,
   borrowAmount: string,
-  recipient: string,
+  repaymentAmount: string,
+  withrawAmount: string,
   insertionPlace?: string,
-  strapId?: string,
+  accountObjId?: string,
+  recipient?: string,
 ) {
-  /**
-   * @description Borrow
-   * @param collateralType Asset , e.g "0x2::iota::IOTA"
-   * @param collateralAmount
-   * @param borrowAmount
-   * @param recipient
-   * @param insertionPlace  Optional
-   * @param strapId         Optional
-   */
   const iotaClient = client.getClient();
-
-  const coin = getCoinSymbol(collateralType);
-  if (!coin) {
-    throw new Error("Collateral not supported");
-  }
-
-  const collInputCoin = await getInputCoins(
+  const coinType = COINS_TYPE_LIST[collateralSymbol];
+  const [depositCoin] = await getInputCoins(
     tx,
     iotaClient,
-    recipient,
-    collateralType,
+    sender,
+    coinType,
     collateralAmount,
   );
-  client.updateSupraOracle(tx, coin);
-
-  if (borrowAmount !== "0") {
-    const stableBalance = client.borrow(
-      tx,
-      collateralType,
-      coinIntoBalance(tx, collateralType, collInputCoin),
-      tx.pure.u64(borrowAmount),
-      insertionPlace,
-      strapId,
-    );
-    if (!stableBalance) return;
-
-    tx.transferObjects(
-      [coinFromBalance(tx, COINS_TYPE_LIST.VUSD, stableBalance)],
-      recipient,
-    );
-  } else {
-    client.topUp(
-      tx,
-      collateralType,
-      coinIntoBalance(tx, collateralType, collInputCoin),
-      recipient,
-      insertionPlace,
-    );
-  }
+  const [repaymentCoin] = await getInputCoins(
+    tx,
+    iotaClient,
+    sender,
+    COINS_TYPE_LIST.VUSD,
+    repaymentAmount,
+  );
+  const [priceResult] =
+    Number(borrowAmount) > 0 || Number(withrawAmount) > 0
+      ? client.aggregatePrice(tx, collateralSymbol)
+      : [undefined];
+  const [manageRequest] = client.requestManagePosition(
+    tx,
+    collateralSymbol,
+    depositCoin,
+    borrowAmount,
+    repaymentCoin,
+    withrawAmount,
+    accountObjId,
+  );
+  const [collCoin, vusdCoin] = client.managePosition(
+    tx,
+    collateralSymbol,
+    manageRequest,
+    priceResult,
+    insertionPlace,
+  );
+  tx.transferObjects([collCoin, vusdCoin], recipient ?? sender);
 }
