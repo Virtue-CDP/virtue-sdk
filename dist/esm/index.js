@@ -344,7 +344,7 @@ var VirtueClient = class {
     const [collector] = this.newPriceCollector(tx, coinSymbol);
     const coinType = COINS_TYPE_LIST[coinSymbol];
     tx.moveCall({
-      target: `${TESTNET_PRICE_PACKAGE_ID}::testnet_price::feed_price`,
+      target: `${TESTNET_PRICE_PACKAGE_ID}::testnet_price::self_price`,
       typeArguments: [coinType],
       arguments: [tx.sharedObjectRef(TESTNET_PRICE_FEED_OBJ), collector]
     });
