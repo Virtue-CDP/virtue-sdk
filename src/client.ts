@@ -216,6 +216,7 @@ export class VirtueClient {
       ? tx.moveCall({
           target: `0x2::option::some`,
           typeArguments: [getPriceResultType(coinSymbol)],
+          arguments: [priceResult],
         })
       : tx.moveCall({
           target: `0x2::option::none`,

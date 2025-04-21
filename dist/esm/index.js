@@ -403,7 +403,8 @@ var VirtueClient = class {
     const vault = VAULT_MAP[coinSymbol].vault;
     const priceResultOpt = priceResult ? tx.moveCall({
       target: `0x2::option::some`,
-      typeArguments: [getPriceResultType(coinSymbol)]
+      typeArguments: [getPriceResultType(coinSymbol)],
+      arguments: [priceResult]
     }) : tx.moveCall({
       target: `0x2::option::none`,
       typeArguments: [getPriceResultType(coinSymbol)]
