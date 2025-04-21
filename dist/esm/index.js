@@ -423,6 +423,44 @@ var VirtueClient = class {
     });
   }
 };
+
+// src/builder.ts
+async function buildManagePositionTx(client, tx, sender, collateralSymbol, collateralAmount, borrowAmount, repaymentAmount, withrawAmount, insertionPlace, accountObjId, recipient) {
+  const iotaClient = client.getClient();
+  const coinType = COINS_TYPE_LIST[collateralSymbol];
+  const [depositCoin] = await getInputCoins(
+    tx,
+    iotaClient,
+    sender,
+    coinType,
+    collateralAmount
+  );
+  const [repaymentCoin] = await getInputCoins(
+    tx,
+    iotaClient,
+    sender,
+    COINS_TYPE_LIST.VUSD,
+    repaymentAmount
+  );
+  const [priceResult] = Number(borrowAmount) > 0 || Number(withrawAmount) > 0 ? client.aggregatePrice(tx, collateralSymbol) : [void 0];
+  const [manageRequest] = client.requestManagePosition(
+    tx,
+    collateralSymbol,
+    depositCoin,
+    borrowAmount,
+    repaymentCoin,
+    withrawAmount,
+    accountObjId
+  );
+  const [collCoin, vusdCoin] = client.managePosition(
+    tx,
+    collateralSymbol,
+    manageRequest,
+    priceResult,
+    insertionPlace
+  );
+  tx.transferObjects([collCoin, vusdCoin], recipient ?? sender);
+}
 export {
   CDP_PACKAGE_ID,
   CDP_VERSION_OBJ,
@@ -443,6 +481,7 @@ export {
   VAULT_MAP,
   VUSD_PACKAGE_ID,
   VirtueClient,
+  buildManagePositionTx,
   coinFromBalance,
   coinIntoBalance,
   formatUnits,
