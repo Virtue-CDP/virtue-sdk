@@ -378,7 +378,7 @@ var VirtueClient = class {
       target: `${FRAMEWORK_PACKAGE_ID}::account::request`
     });
     return tx.moveCall({
-      target: `${CDP_PACKAGE_ID}::manager::request`,
+      target: `${CDP_PACKAGE_ID}::manage::request`,
       typeArguments: [coinType],
       arguments: [
         tx.sharedObjectRef(CDP_VERSION_OBJ),
