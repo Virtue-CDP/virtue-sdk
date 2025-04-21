@@ -57,7 +57,7 @@ export const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo> = {
     priceAggregater: {
       objectId:
         "0x9f3c9d72993efd5e2e543ad69bdc0bbe1bd9873c3a61fdf32c0cf48660a5f2c8",
-      mutable: false,
+      mutable: true,
       initialSharedVersion: 190869399,
     },
     vault: {
@@ -75,6 +75,6 @@ export const TESTNET_PRICE_PACKAGE_ID =
 export const TESTNET_PRICE_FEED_OBJ = {
   objectId:
     "0x05cc35b8d331a3893f80b9ca6c70c3b75298e9cbf1b5d707b6d18c40b0b3da5d",
-  mutable: true,
+  mutable: false,
   initialSharedVersion: 190869400,
 };
