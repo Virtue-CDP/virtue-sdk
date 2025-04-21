@@ -43,7 +43,7 @@ export const CDP_VERSION_OBJ = {
   objectId:
     "0xb67e79921b2b71e77e5bd1adf28c9d47a8ad5bd22e024bbd90797514c39b068d",
   mutable: false,
-  initialSharedVersion: 237544284,
+  initialSharedVersion: 190869403,
 };
 
 export type VaultObjectInfo = {
