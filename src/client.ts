@@ -135,7 +135,7 @@ export class VirtueClient {
     const coinType = COINS_TYPE_LIST[coinSymbol];
     // TODO: testnet only
     tx.moveCall({
-      target: `${TESTNET_PRICE_PACKAGE_ID}::testnet_price::feed_price`,
+      target: `${TESTNET_PRICE_PACKAGE_ID}::testnet_price::self_price`,
       typeArguments: [coinType],
       arguments: [tx.sharedObjectRef(TESTNET_PRICE_FEED_OBJ), collector],
     });
