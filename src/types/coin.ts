@@ -1,2 +1,2 @@
 export type COIN = "IOTA" | "stIOTA" | "VUSD";
-export type COLLATERAL_COIN = "IOTA";
+export type COLLATERAL_COIN = "IOTA" | "stIOTA";

@@ -49,6 +49,18 @@ var VAULT_MAP = {
       mutable: true,
       initialSharedVersion: 237544284
     }
+  },
+  stIOTA: {
+    priceAggregater: {
+      objectId: "0xad71067ef6b3724bf9db065e40f5e34ebf1252e203a964b04b22cef0b953ebff",
+      mutable: true,
+      initialSharedVersion: 237544292
+    },
+    vault: {
+      objectId: "0xee754802462d920e877d6c05b968a449c35399d4b7fcaadefae17dd0007458a3",
+      mutable: true,
+      initialSharedVersion: 243873287
+    }
   }
 };
 var TESTNET_PRICE_PACKAGE_ID = "0x2de2d918f5940978dc53aae2ea0687a4ca8a6736bd525f15ee17e9529048fa92";

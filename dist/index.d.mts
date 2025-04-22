@@ -5,7 +5,7 @@ import { Infer } from 'superstruct';
 import { SharedObjectRef } from '@iota/iota-sdk/dist/cjs/bcs/types';
 
 type COIN = "IOTA" | "stIOTA" | "VUSD";
-type COLLATERAL_COIN = "IOTA";
+type COLLATERAL_COIN = "IOTA" | "stIOTA";
 
 type Float = {
     fields: {
