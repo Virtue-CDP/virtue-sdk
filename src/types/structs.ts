@@ -16,6 +16,7 @@ export type VaultInfo = {
 };
 
 export type Position = {
+  token: COLLATERAL_COIN;
   collAmount: string;
   debtAmount: string;
 };

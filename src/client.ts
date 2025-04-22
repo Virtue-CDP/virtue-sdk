@@ -4,10 +4,9 @@ import {
   TransactionResult,
 } from "@iota/iota-sdk/transactions";
 import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
-// import { bcs } from "@iota/iota-sdk/bcs";
 
-import { VaultInfo, VaultResponse, COLLATERAL_COIN, Position } from "./types";
-import { getObjectFields, getPriceResultType } from "./utils";
+import { VaultInfo, VaultResponse, COLLATERAL_COIN, Position, VaultInfoList, PositionResponse } from "./types";
+import { getObjectFields, getPriceResultType, parsePositionObject } from "./utils";
 import {
   CDP_PACKAGE_ID,
   CDP_VERSION_OBJ,
@@ -20,7 +19,7 @@ import {
   TREASURY_OBJ,
   VAULT_MAP,
 } from "./constants";
-
+import { parseVaultObject } from "./utils";
 const DUMMY_ADDRESS = "0x0";
 
 export class VirtueClient {
@@ -56,42 +55,72 @@ export class VirtueClient {
 
   // Query
   /**
+   * @description Get all vault objects
+   */
+  async getAllVaults(): Promise<VaultInfoList> {
+    // Get objectId from VAULT_MAP and get all vaults
+    const vaultObjectIds = Object.values(VAULT_MAP).map((v) => v.vault.objectId);
+    const vaultResults = await this.client.multiGetObjects({
+      ids: vaultObjectIds,
+      options: {
+        showContent: true,
+      },
+    });
+
+    const vaults: VaultInfoList = vaultResults.reduce((acc, res) => {
+      const fields = getObjectFields(res) as VaultResponse;
+      const coinSymbol = vaultObjectIds.find((id) => id === res.data?.objectId);
+      const vault = parseVaultObject(coinSymbol as COLLATERAL_COIN, fields);
+      acc[vault.token] = vault;
+      return acc;
+    }, {} as VaultInfoList);
+
+    return vaults
+  }
+
+  /**
    * @description Get Vault<token> object
    */
-  async getVaultInfo(coinSymbol: COLLATERAL_COIN): Promise<VaultInfo> {
-    const vault = VAULT_MAP[coinSymbol];
+  async getVault(coinSymbol: COLLATERAL_COIN): Promise<VaultInfo> {
     const res = await this.client.getObject({
-      id: vault.vault.objectId,
+      id: VAULT_MAP[coinSymbol].vault.objectId,
       options: {
         showContent: true,
       },
     });
     const fields = getObjectFields(res) as VaultResponse;
 
-    const vaultInfo: VaultInfo = {
-      token: coinSymbol,
-      baseFeeRate:
-        Number(fields.position_table.fields.fee_rate ?? 3_000_000) / 10 ** 9,
-      bottleTableSize: fields.position_table.fields.table.fields.size,
-      bottleTableId: fields.position_table.fields.table.fields.id.id,
-      collateralDecimal: Number(fields.decimal),
-      collateralVault: fields.balance,
-      latestRedemptionTime: Number(fields.position_table.fields.timestamp),
-      minCollateralRatio: fields.liquidation_config.fields.mcr.fields.value,
-      mintedBuckAmount: fields.limited_supply.fields.supply,
-      maxMintAmount: fields.limited_supply.fields.limit,
-      recoveryModeThreshold: fields.liquidation_config.fields.ccr.fields.value,
-      minBottleSize: fields.min_debt_amount,
-    };
-
-    return vaultInfo;
+    return parseVaultObject(coinSymbol, fields);
   }
+
+  async getPositionsByDebtor(
+    debtor: string,
+  ): Promise<Position[]> {
+    const vaults = await this.getAllVaults();
+    const positions: Position[] = [];
+    for (const vault of Object.values(vaults)) {
+      const tableId = vault.bottleTableId;
+      const positionRes = await this.client.getDynamicFieldObject({
+        parentId: tableId,
+        name: {
+          type: "address",
+          value: debtor,
+        },
+      });
+      const positionData = getObjectFields(positionRes) as PositionResponse;
+      if (!positionData) continue;
+
+      positions.push(parsePositionObject(vault.token, positionData));
+    }
+    return positions;
+  }
+
 
   async getPosition(
     debtor: string,
     coinSymbol: COLLATERAL_COIN,
   ): Promise<Position | undefined> {
-    const vaultInfo = await this.getVaultInfo(coinSymbol);
+    const vaultInfo = await this.getVault(coinSymbol);
     const tableId = vaultInfo.bottleTableId;
     const positionRes = await this.client.getDynamicFieldObject({
       parentId: tableId,
@@ -100,13 +129,10 @@ export class VirtueClient {
         value: debtor,
       },
     });
-    const positionData = getObjectFields(positionRes);
+    const positionData = getObjectFields(positionRes) as PositionResponse;
     if (!positionData) return;
-    positionData;
-    return {
-      collAmount: positionData.coll_amount,
-      debtAmount: positionData.debt_amount,
-    };
+
+    return parsePositionObject(coinSymbol, positionData);
   }
 
   /**
@@ -173,14 +199,14 @@ export class VirtueClient {
     const coinType = COINS_TYPE_LIST[coinSymbol];
     const [accountReq] = accountObj
       ? tx.moveCall({
-          target: `${FRAMEWORK_PACKAGE_ID}::account::request_with_account`,
-          arguments: [
-            typeof accountObj === "string" ? tx.object(accountObj) : accountObj,
-          ],
-        })
+        target: `${FRAMEWORK_PACKAGE_ID}::account::request_with_account`,
+        arguments: [
+          typeof accountObj === "string" ? tx.object(accountObj) : accountObj,
+        ],
+      })
       : tx.moveCall({
-          target: `${FRAMEWORK_PACKAGE_ID}::account::request`,
-        });
+        target: `${FRAMEWORK_PACKAGE_ID}::account::request`,
+      });
     return tx.moveCall({
       target: `${CDP_PACKAGE_ID}::manage::request`,
       typeArguments: [coinType],
@@ -214,14 +240,14 @@ export class VirtueClient {
     const vault = VAULT_MAP[coinSymbol].vault;
     const priceResultOpt = priceResult
       ? tx.moveCall({
-          target: `0x1::option::some`,
-          typeArguments: [getPriceResultType(coinSymbol)],
-          arguments: [priceResult],
-        })
+        target: `0x1::option::some`,
+        typeArguments: [getPriceResultType(coinSymbol)],
+        arguments: [priceResult],
+      })
       : tx.moveCall({
-          target: `0x1::option::none`,
-          typeArguments: [getPriceResultType(coinSymbol)],
-        });
+        target: `0x1::option::none`,
+        typeArguments: [getPriceResultType(coinSymbol)],
+      });
     return tx.moveCall({
       target: `${CDP_PACKAGE_ID}::vault::manage_position`,
       typeArguments: [COINS_TYPE_LIST[coinSymbol]],

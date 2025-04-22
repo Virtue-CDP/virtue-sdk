@@ -55,6 +55,10 @@ type VaultResponse = {
         };
     };
 };
+type PositionResponse = {
+    coll_amount: string;
+    debt_amount: string;
+};
 
 type VaultInfo = {
     token: COLLATERAL_COIN;
@@ -71,6 +75,7 @@ type VaultInfo = {
     recoveryModeThreshold: string;
 };
 type Position = {
+    token: COLLATERAL_COIN;
     collAmount: string;
     debtAmount: string;
 };
@@ -89,9 +94,14 @@ declare class VirtueClient {
     constructor(network?: string, owner?: string);
     getClient(): IotaClient;
     /**
+     * @description Get all vault objects
+     */
+    getAllVaults(): Promise<VaultInfoList>;
+    /**
      * @description Get Vault<token> object
      */
-    getVaultInfo(coinSymbol: COLLATERAL_COIN): Promise<VaultInfo>;
+    getVault(coinSymbol: COLLATERAL_COIN): Promise<VaultInfo>;
+    getPositionsByDebtor(debtor: string): Promise<Position[]>;
     getPosition(debtor: string, coinSymbol: COLLATERAL_COIN): Promise<Position | undefined>;
     /**
      * @description Create a price collector
@@ -155,6 +165,26 @@ declare function getMoveObject(data: IotaObjectResponse | IotaObjectData): IotaM
 declare function getObjectFields(resp: IotaObjectResponse | IotaMoveObject | IotaObjectData): ObjectContentFields | undefined;
 declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
+declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => {
+    token: COLLATERAL_COIN;
+    baseFeeRate: number;
+    bottleTableSize: string;
+    bottleTableId: string;
+    collateralDecimal: number;
+    collateralVault: string;
+    latestRedemptionTime: number;
+    minCollateralRatio: string;
+    mintedBuckAmount: string;
+    maxMintAmount: string;
+    recoveryModeThreshold: string;
+    minBottleSize: string;
+};
+declare const parsePositionObject: (coinSymbol: COLLATERAL_COIN, fields: PositionResponse) => {
+    token: COLLATERAL_COIN;
+    collAmount: string;
+    debtAmount: string;
+};
+
 declare function buildManagePositionTx(client: VirtueClient, tx: Transaction, sender: string, collateralSymbol: COLLATERAL_COIN, collateralAmount: string, borrowAmount: string, repaymentAmount: string, withrawAmount: string, insertionPlace?: string, accountObjId?: string, recipient?: string): Promise<void>;
 
 declare const COINS_TYPE_LIST: Record<COIN, string>;
@@ -195,4 +225,4 @@ declare const TESTNET_PRICE_FEED_OBJ: {
     initialSharedVersion: number;
 };
 
-export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type Position, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildManagePositionTx, coinFromBalance, coinIntoBalance, formatUnits, getCoinSymbol, getCoinType, getCoinTypeFromPipe, getCoinTypeFromTank, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits };
+export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type Position, type PositionResponse, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildManagePositionTx, coinFromBalance, coinIntoBalance, formatUnits, getCoinSymbol, getCoinType, getCoinTypeFromPipe, getCoinTypeFromTank, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseUnits, parseVaultObject };

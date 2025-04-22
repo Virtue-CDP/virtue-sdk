@@ -39,3 +39,9 @@ export type VaultResponse = {
     };
   };
 };
+
+
+export type PositionResponse = {
+  coll_amount: string;
+  debt_amount: string;
+};

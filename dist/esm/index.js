@@ -275,6 +275,33 @@ var getObjectGenerics = (resp) => {
   return startIdx ? objType.slice(startIdx + 1, endIdx).split(", ") : [];
 };
 
+// src/utils/response.ts
+var parseVaultObject = (coinSymbol, fields) => {
+  const vault = {
+    token: coinSymbol,
+    baseFeeRate: Number(fields.position_table.fields.fee_rate ?? 3e6) / 10 ** 9,
+    bottleTableSize: fields.position_table.fields.table.fields.size,
+    bottleTableId: fields.position_table.fields.table.fields.id.id,
+    collateralDecimal: Number(fields.decimal),
+    collateralVault: fields.balance,
+    latestRedemptionTime: Number(fields.position_table.fields.timestamp),
+    minCollateralRatio: fields.liquidation_config.fields.mcr.fields.value,
+    mintedBuckAmount: fields.limited_supply.fields.supply,
+    maxMintAmount: fields.limited_supply.fields.limit,
+    recoveryModeThreshold: fields.liquidation_config.fields.ccr.fields.value,
+    minBottleSize: fields.min_debt_amount
+  };
+  return vault;
+};
+var parsePositionObject = (coinSymbol, fields) => {
+  const position = {
+    token: coinSymbol,
+    collAmount: fields.coll_amount,
+    debtAmount: fields.debt_amount
+  };
+  return position;
+};
+
 // src/client.ts
 var DUMMY_ADDRESS = "0x0";
 var VirtueClient = class {
@@ -293,35 +320,58 @@ var VirtueClient = class {
   }
   // Query
   /**
+   * @description Get all vault objects
+   */
+  async getAllVaults() {
+    const vaultObjectIds = Object.values(VAULT_MAP).map((v) => v.vault.objectId);
+    const vaultResults = await this.client.multiGetObjects({
+      ids: vaultObjectIds,
+      options: {
+        showContent: true
+      }
+    });
+    const vaults = vaultResults.reduce((acc, res) => {
+      const fields = getObjectFields(res);
+      const coinSymbol = vaultObjectIds.find((id) => id === res.data?.objectId);
+      const vault = parseVaultObject(coinSymbol, fields);
+      acc[vault.token] = vault;
+      return acc;
+    }, {});
+    return vaults;
+  }
+  /**
    * @description Get Vault<token> object
    */
-  async getVaultInfo(coinSymbol) {
-    const vault = VAULT_MAP[coinSymbol];
+  async getVault(coinSymbol) {
     const res = await this.client.getObject({
-      id: vault.vault.objectId,
+      id: VAULT_MAP[coinSymbol].vault.objectId,
       options: {
         showContent: true
       }
     });
     const fields = getObjectFields(res);
-    const vaultInfo = {
-      token: coinSymbol,
-      baseFeeRate: Number(fields.position_table.fields.fee_rate ?? 3e6) / 10 ** 9,
-      bottleTableSize: fields.position_table.fields.table.fields.size,
-      bottleTableId: fields.position_table.fields.table.fields.id.id,
-      collateralDecimal: Number(fields.decimal),
-      collateralVault: fields.balance,
-      latestRedemptionTime: Number(fields.position_table.fields.timestamp),
-      minCollateralRatio: fields.liquidation_config.fields.mcr.fields.value,
-      mintedBuckAmount: fields.limited_supply.fields.supply,
-      maxMintAmount: fields.limited_supply.fields.limit,
-      recoveryModeThreshold: fields.liquidation_config.fields.ccr.fields.value,
-      minBottleSize: fields.min_debt_amount
-    };
-    return vaultInfo;
+    return parseVaultObject(coinSymbol, fields);
+  }
+  async getPositionsByDebtor(debtor) {
+    const vaults = await this.getAllVaults();
+    const positions = [];
+    for (const vault of Object.values(vaults)) {
+      const tableId = vault.bottleTableId;
+      const positionRes = await this.client.getDynamicFieldObject({
+        parentId: tableId,
+        name: {
+          type: "address",
+          value: debtor
+        }
+      });
+      const positionData = getObjectFields(positionRes);
+      if (!positionData) continue;
+      positions.push(parsePositionObject(vault.token, positionData));
+    }
+    return positions;
   }
   async getPosition(debtor, coinSymbol) {
-    const vaultInfo = await this.getVaultInfo(coinSymbol);
+    const vaultInfo = await this.getVault(coinSymbol);
     const tableId = vaultInfo.bottleTableId;
     const positionRes = await this.client.getDynamicFieldObject({
       parentId: tableId,
@@ -332,11 +382,7 @@ var VirtueClient = class {
     });
     const positionData = getObjectFields(positionRes);
     if (!positionData) return;
-    positionData;
-    return {
-      collAmount: positionData.coll_amount,
-      debtAmount: positionData.debt_amount
-    };
+    return parsePositionObject(coinSymbol, positionData);
   }
   /**
    * @description Create a price collector
@@ -510,6 +556,8 @@ export {
   getObjectGenerics,
   getObjectNames,
   getPriceResultType,
-  parseUnits
+  parsePositionObject,
+  parseUnits,
+  parseVaultObject
 };
 //# sourceMappingURL=index.js.map
