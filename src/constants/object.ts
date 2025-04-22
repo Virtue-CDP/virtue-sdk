@@ -21,7 +21,7 @@ export const VUSD_PACKAGE_ID =
 export const ORACLE_PACKAGE_ID =
   "0xbc672e6330ab22078715f86e952ef1353d9f9b217c4579e47ce29eaec6f92655";
 export const CDP_PACKAGE_ID =
-  "0xf7fb5c28060118bd23ed35ee55b6fa243ab98a5b3cf64ca64c1fa915b4214d92";
+  "0x047ea5037499b28cc3e51d9d92af2962679cb5453fcec710dd9db36af0e2100e";
 
 /// Shared Objects
 
