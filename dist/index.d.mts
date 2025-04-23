@@ -189,7 +189,7 @@ declare const ORIGINAL_CDP_PACKAGE_ID = "0x0731a9f5cbdb0a4aea3f540280a1a26650201
 declare const FRAMEWORK_PACKAGE_ID = "0x6f8dd0377fe5469cd3456350ca13ae1799655fda06e90191b73ab1c0c0165e8f";
 declare const VUSD_PACKAGE_ID = "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081";
 declare const ORACLE_PACKAGE_ID = "0xbc672e6330ab22078715f86e952ef1353d9f9b217c4579e47ce29eaec6f92655";
-declare const CDP_PACKAGE_ID = "0xd38c762461994a9e5ce88eca594ba8cadc571843e06d2e5970990844a1c43bb7";
+declare const CDP_PACKAGE_ID = "0x229091f5fcf75c094372671ca58caa074c90f99c8975e145b3ffc3d23e49a493";
 declare const CLOCK_OBJ: {
     objectId: string;
     mutable: boolean;
