@@ -57,9 +57,9 @@ var VAULT_MAP = {
       initialSharedVersion: 237544292
     },
     vault: {
-      objectId: "0xee754802462d920e877d6c05b968a449c35399d4b7fcaadefae17dd0007458a3",
+      objectId: "0xdef4f5ec71ad943a536b4032a7c64003c9c580c278eb564d381e8f8014e6970c",
       mutable: true,
-      initialSharedVersion: 243873287
+      initialSharedVersion: 245030868
     }
   }
 };
