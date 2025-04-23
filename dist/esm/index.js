@@ -120,6 +120,10 @@ var formatUnits = (value, decimals) => {
   fraction = fraction.replace(/(0+)$/, "");
   return `${negative ? "-" : ""}${integer || "0"}${fraction ? `.${fraction}` : ""}`;
 };
+var formatBigInt = (value, decimals = 9) => {
+  const formatted = formatUnits(BigInt(value), decimals);
+  return Number(formatted);
+};
 var parseUnits = (value, decimals) => {
   let [integer, fraction = "0"] = typeof value == "string" ? value.split(".") : value.toString().split(".");
   if (integer === void 0) {
@@ -264,16 +268,22 @@ var getObjectGenerics = (resp) => {
 var parseVaultObject = (coinSymbol, fields) => {
   const vault = {
     token: coinSymbol,
-    baseFeeRate: Number(fields.position_table.fields.fee_rate ?? 3e6) / 10 ** 9,
     bottleTableSize: fields.position_table.fields.table.fields.size,
     bottleTableId: fields.position_table.fields.table.fields.id.id,
     collateralDecimal: Number(fields.decimal),
     collateralVault: fields.balance,
     latestRedemptionTime: Number(fields.position_table.fields.timestamp),
-    minCollateralRatio: fields.liquidation_config.fields.mcr.fields.value,
-    mintedBuckAmount: fields.limited_supply.fields.supply,
+    mintedAmount: fields.limited_supply.fields.supply,
     maxMintAmount: fields.limited_supply.fields.limit,
-    recoveryModeThreshold: fields.liquidation_config.fields.ccr.fields.value,
+    baseFeeRate: formatBigInt(
+      fields.position_table.fields.fee_rate.fields.value ?? 3e6
+    ),
+    minCollateralRatio: formatBigInt(
+      fields.liquidation_config.fields.mcr.fields.value
+    ),
+    recoveryModeThreshold: formatBigInt(
+      fields.liquidation_config.fields.ccr.fields.value
+    ),
     minBottleSize: fields.min_debt_amount
   };
   return vault;
@@ -543,6 +553,7 @@ export {
   buildManagePositionTx,
   coinFromBalance,
   coinIntoBalance,
+  formatBigInt,
   formatUnits,
   getCoinSymbol,
   getCoinType,

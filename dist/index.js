@@ -120,6 +120,10 @@ var formatUnits = (value, decimals) => {
   fraction = fraction.replace(/(0+)$/, "");
   return `${negative ? "-" : ""}${integer || "0"}${fraction ? `.${fraction}` : ""}`;
 };
+var formatBigInt = (value, decimals = 9) => {
+  const formatted = formatUnits(BigInt(value), decimals);
+  return Number(formatted);
+};
 var parseUnits = (value, decimals) => {
   let [integer, fraction = "0"] = typeof value == "string" ? value.split(".") : value.toString().split(".");
   if (integer === void 0) {
@@ -264,16 +268,22 @@ var getObjectGenerics = (resp) => {
 var parseVaultObject = (coinSymbol, fields) => {
   const vault = {
     token: coinSymbol,
-    baseFeeRate: Number(_nullishCoalesce(fields.position_table.fields.fee_rate, () => ( 3e6))) / 10 ** 9,
     bottleTableSize: fields.position_table.fields.table.fields.size,
     bottleTableId: fields.position_table.fields.table.fields.id.id,
     collateralDecimal: Number(fields.decimal),
     collateralVault: fields.balance,
     latestRedemptionTime: Number(fields.position_table.fields.timestamp),
-    minCollateralRatio: fields.liquidation_config.fields.mcr.fields.value,
-    mintedBuckAmount: fields.limited_supply.fields.supply,
+    mintedAmount: fields.limited_supply.fields.supply,
     maxMintAmount: fields.limited_supply.fields.limit,
-    recoveryModeThreshold: fields.liquidation_config.fields.ccr.fields.value,
+    baseFeeRate: formatBigInt(
+      _nullishCoalesce(fields.position_table.fields.fee_rate.fields.value, () => ( 3e6))
+    ),
+    minCollateralRatio: formatBigInt(
+      fields.liquidation_config.fields.mcr.fields.value
+    ),
+    recoveryModeThreshold: formatBigInt(
+      fields.liquidation_config.fields.ccr.fields.value
+    ),
     minBottleSize: fields.min_debt_amount
   };
   return vault;
@@ -557,5 +567,6 @@ async function buildManagePositionTx(client, tx, sender, collateralSymbol, colla
 
 
 
-exports.CDP_PACKAGE_ID = CDP_PACKAGE_ID; exports.CDP_VERSION_OBJ = CDP_VERSION_OBJ; exports.CLOCK_OBJ = CLOCK_OBJ; exports.COINS_TYPE_LIST = COINS_TYPE_LIST; exports.COIN_DECIMALS = COIN_DECIMALS; exports.FRAMEWORK_PACKAGE_ID = FRAMEWORK_PACKAGE_ID; exports.ORACLE_PACKAGE_ID = ORACLE_PACKAGE_ID; exports.ORIGINAL_CDP_PACKAGE_ID = ORIGINAL_CDP_PACKAGE_ID; exports.ORIGINAL_FRAMEWORK_PACKAGE_ID = ORIGINAL_FRAMEWORK_PACKAGE_ID; exports.ORIGINAL_ORACLE_PACKAGE_ID = ORIGINAL_ORACLE_PACKAGE_ID; exports.ORIGINAL_VUSD_PACKAGE_ID = ORIGINAL_VUSD_PACKAGE_ID; exports.ObjectContentFields = ObjectContentFields; exports.TESTNET_PRICE_FEED_OBJ = TESTNET_PRICE_FEED_OBJ; exports.TESTNET_PRICE_PACKAGE_ID = TESTNET_PRICE_PACKAGE_ID; exports.TREASURY_OBJ = TREASURY_OBJ; exports.U64FromBytes = U64FromBytes; exports.VAULT_MAP = VAULT_MAP; exports.VUSD_PACKAGE_ID = VUSD_PACKAGE_ID; exports.VirtueClient = VirtueClient; exports.buildManagePositionTx = buildManagePositionTx; exports.coinFromBalance = coinFromBalance; exports.coinIntoBalance = coinIntoBalance; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getInputCoins = getInputCoins; exports.getIotaObjectData = getIotaObjectData; exports.getMainCoin = getMainCoin; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.getPriceResultType = getPriceResultType; exports.parsePositionObject = parsePositionObject; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
+
+exports.CDP_PACKAGE_ID = CDP_PACKAGE_ID; exports.CDP_VERSION_OBJ = CDP_VERSION_OBJ; exports.CLOCK_OBJ = CLOCK_OBJ; exports.COINS_TYPE_LIST = COINS_TYPE_LIST; exports.COIN_DECIMALS = COIN_DECIMALS; exports.FRAMEWORK_PACKAGE_ID = FRAMEWORK_PACKAGE_ID; exports.ORACLE_PACKAGE_ID = ORACLE_PACKAGE_ID; exports.ORIGINAL_CDP_PACKAGE_ID = ORIGINAL_CDP_PACKAGE_ID; exports.ORIGINAL_FRAMEWORK_PACKAGE_ID = ORIGINAL_FRAMEWORK_PACKAGE_ID; exports.ORIGINAL_ORACLE_PACKAGE_ID = ORIGINAL_ORACLE_PACKAGE_ID; exports.ORIGINAL_VUSD_PACKAGE_ID = ORIGINAL_VUSD_PACKAGE_ID; exports.ObjectContentFields = ObjectContentFields; exports.TESTNET_PRICE_FEED_OBJ = TESTNET_PRICE_FEED_OBJ; exports.TESTNET_PRICE_PACKAGE_ID = TESTNET_PRICE_PACKAGE_ID; exports.TREASURY_OBJ = TREASURY_OBJ; exports.U64FromBytes = U64FromBytes; exports.VAULT_MAP = VAULT_MAP; exports.VUSD_PACKAGE_ID = VUSD_PACKAGE_ID; exports.VirtueClient = VirtueClient; exports.buildManagePositionTx = buildManagePositionTx; exports.coinFromBalance = coinFromBalance; exports.coinIntoBalance = coinIntoBalance; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getInputCoins = getInputCoins; exports.getIotaObjectData = getIotaObjectData; exports.getMainCoin = getMainCoin; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.getPriceResultType = getPriceResultType; exports.parsePositionObject = parsePositionObject; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
 //# sourceMappingURL=index.js.map

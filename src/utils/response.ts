@@ -5,7 +5,7 @@ import {
   VaultInfo,
   VaultResponse,
 } from "@/types";
-import { getCoinSymbol, getCoinType } from "./format";
+import { formatBigInt, getCoinSymbol, getCoinType } from "./format";
 
 // Convert response into vault object
 export const parseVaultObject = (
@@ -14,17 +14,22 @@ export const parseVaultObject = (
 ): VaultInfo => {
   const vault = {
     token: coinSymbol,
-    baseFeeRate:
-      Number(fields.position_table.fields.fee_rate ?? 3_000_000) / 10 ** 9,
     bottleTableSize: fields.position_table.fields.table.fields.size,
     bottleTableId: fields.position_table.fields.table.fields.id.id,
     collateralDecimal: Number(fields.decimal),
     collateralVault: fields.balance,
     latestRedemptionTime: Number(fields.position_table.fields.timestamp),
-    minCollateralRatio: fields.liquidation_config.fields.mcr.fields.value,
-    mintedBuckAmount: fields.limited_supply.fields.supply,
+    mintedAmount: fields.limited_supply.fields.supply,
     maxMintAmount: fields.limited_supply.fields.limit,
-    recoveryModeThreshold: fields.liquidation_config.fields.ccr.fields.value,
+    baseFeeRate: formatBigInt(
+      fields.position_table.fields.fee_rate.fields.value ?? 3_000_000,
+    ),
+    minCollateralRatio: formatBigInt(
+      fields.liquidation_config.fields.mcr.fields.value,
+    ),
+    recoveryModeThreshold: formatBigInt(
+      fields.liquidation_config.fields.ccr.fields.value,
+    ),
     minBottleSize: fields.min_debt_amount,
   };
 

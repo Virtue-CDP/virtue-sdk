@@ -78,11 +78,11 @@ type VaultInfo = {
     collateralDecimal: number;
     collateralVault: string;
     latestRedemptionTime: number;
-    minCollateralRatio: string;
-    mintedBuckAmount: string;
+    minCollateralRatio: number;
+    mintedAmount: string;
     minBottleSize: string;
     maxMintAmount: string;
-    recoveryModeThreshold: string;
+    recoveryModeThreshold: number;
 };
 type PositionInfo = {
     collateral: COLLATERAL_COIN;
@@ -151,6 +151,7 @@ declare const getCoinType: (str: string) => string | null;
 declare const getCoinSymbol: (coinType: string) => COIN | undefined;
 declare function U64FromBytes(x: number[]): bigint;
 declare const formatUnits: (value: bigint, decimals: number) => string;
+declare const formatBigInt: (value: string, decimals?: number) => number;
 declare const parseUnits: (value: number | string, decimals: number) => bigint;
 declare const getPriceResultType: (coinSymbol: COLLATERAL_COIN) => string;
 
@@ -216,4 +217,4 @@ declare const TESTNET_PRICE_FEED_OBJ: {
     initialSharedVersion: number;
 };
 
-export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type PositionInfo, type PositionResponse, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildManagePositionTx, coinFromBalance, coinIntoBalance, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type PositionInfo, type PositionResponse, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildManagePositionTx, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseUnits, parseVaultObject };

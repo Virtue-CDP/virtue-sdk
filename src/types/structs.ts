@@ -8,11 +8,11 @@ export type VaultInfo = {
   collateralDecimal: number;
   collateralVault: string;
   latestRedemptionTime: number;
-  minCollateralRatio: string;
-  mintedBuckAmount: string;
+  minCollateralRatio: number;
+  mintedAmount: string;
   minBottleSize: string;
   maxMintAmount: string;
-  recoveryModeThreshold: string;
+  recoveryModeThreshold: number;
 };
 
 export type PositionInfo = {

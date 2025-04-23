@@ -67,6 +67,11 @@ export const formatUnits = (value: bigint, decimals: number) => {
   }`;
 };
 
+export const formatBigInt = (value: string, decimals: number = 9) => {
+  const formatted = formatUnits(BigInt(value), decimals);
+  return Number(formatted);
+};
+
 export const parseUnits = (value: number | string, decimals: number) => {
   let [integer, fraction = "0"] =
     typeof value == "string" ? value.split(".") : value.toString().split(".");
