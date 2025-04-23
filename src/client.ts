@@ -21,7 +21,7 @@ import {
   VaultInfo,
   VaultResponse,
   COLLATERAL_COIN,
-  Position,
+  PositionInfo,
   VaultInfoList,
   PositionResponse,
 } from "@/types";
@@ -113,9 +113,9 @@ export class VirtueClient {
     return parseVaultObject(token, fields);
   }
 
-  async getPositionsByDebtor(debtor: string): Promise<Position[]> {
+  async getPositionsByDebtor(debtor: string): Promise<PositionInfo[]> {
     const vaults = await this.getAllVaults();
-    const positions: Position[] = [];
+    const positions: PositionInfo[] = [];
     for (const vault of Object.values(vaults)) {
       const tableId = vault.bottleTableId;
       const res = await this.client.getDynamicFieldObject({
@@ -141,7 +141,7 @@ export class VirtueClient {
   async getPosition(
     debtor: string,
     collateral: COLLATERAL_COIN,
-  ): Promise<Position | undefined> {
+  ): Promise<PositionInfo | undefined> {
     const vaultInfo = await this.getVault(collateral);
     const tableId = vaultInfo.bottleTableId;
     const res = await this.client.getDynamicFieldObject({

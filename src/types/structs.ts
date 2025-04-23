@@ -15,7 +15,7 @@ export type VaultInfo = {
   recoveryModeThreshold: string;
 };
 
-export type Position = {
+export type PositionInfo = {
   collateral: COLLATERAL_COIN;
   collAmount: string;
   debtAmount: string;

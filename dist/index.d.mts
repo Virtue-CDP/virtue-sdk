@@ -84,7 +84,7 @@ type VaultInfo = {
     maxMintAmount: string;
     recoveryModeThreshold: string;
 };
-type Position = {
+type PositionInfo = {
     collateral: COLLATERAL_COIN;
     collAmount: string;
     debtAmount: string;
@@ -111,8 +111,8 @@ declare class VirtueClient {
      * @description Get Vault<token> object
      */
     getVault(token: COLLATERAL_COIN): Promise<VaultInfo>;
-    getPositionsByDebtor(debtor: string): Promise<Position[]>;
-    getPosition(debtor: string, collateral: COLLATERAL_COIN): Promise<Position | undefined>;
+    getPositionsByDebtor(debtor: string): Promise<PositionInfo[]>;
+    getPosition(debtor: string, collateral: COLLATERAL_COIN): Promise<PositionInfo | undefined>;
     /**
      * @description Create a price collector
      * @param collateral coin symbol, e.g "IOTA"
@@ -174,7 +174,7 @@ declare function getObjectFields(resp: IotaObjectResponse | IotaMoveObject | Iot
 declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
-declare const parsePositionObject: (resp: PositionResponse) => Position | undefined;
+declare const parsePositionObject: (resp: PositionResponse) => PositionInfo | undefined;
 
 declare function buildManagePositionTx(client: VirtueClient, tx: Transaction, sender: string, collateralSymbol: COLLATERAL_COIN, collateralAmount: string, borrowAmount: string, repaymentAmount: string, withrawAmount: string, insertionPlace?: string, accountObjId?: string, recipient?: string): Promise<void>;
 
@@ -216,4 +216,4 @@ declare const TESTNET_PRICE_FEED_OBJ: {
     initialSharedVersion: number;
 };
 
-export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type Position, type PositionResponse, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildManagePositionTx, coinFromBalance, coinIntoBalance, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type PositionInfo, type PositionResponse, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildManagePositionTx, coinFromBalance, coinIntoBalance, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseUnits, parseVaultObject };

@@ -1,6 +1,6 @@
 import {
   COLLATERAL_COIN,
-  Position,
+  PositionInfo,
   PositionResponse,
   VaultInfo,
   VaultResponse,
@@ -34,7 +34,7 @@ export const parseVaultObject = (
 // Convert response into position object
 export const parsePositionObject = (
   resp: PositionResponse,
-): Position | undefined => {
+): PositionInfo | undefined => {
   const collateral = getCoinSymbol(getCoinType(resp.type) ?? "");
   if (!collateral) {
     return;
