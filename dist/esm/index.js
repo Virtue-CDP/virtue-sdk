@@ -323,7 +323,9 @@ var VirtueClient = class {
    * @description Get all vault objects
    */
   async getAllVaults() {
-    const vaultObjectIds = Object.values(VAULT_MAP).map((v) => v.vault.objectId);
+    const vaultObjectIds = Object.values(VAULT_MAP).map(
+      (v) => v.vault.objectId
+    );
     const vaultResults = await this.client.multiGetObjects({
       ids: vaultObjectIds,
       options: {
@@ -332,8 +334,11 @@ var VirtueClient = class {
     });
     const vaults = vaultResults.reduce((acc, res) => {
       const fields = getObjectFields(res);
-      const coinSymbol = vaultObjectIds.find((id) => id === res.data?.objectId);
-      const vault = parseVaultObject(coinSymbol, fields);
+      const token = Object.keys(VAULT_MAP).find(
+        (key) => VAULT_MAP[key].vault.objectId === res.data?.objectId
+      );
+      if (!token) return acc;
+      const vault = parseVaultObject(token, fields);
       acc[vault.token] = vault;
       return acc;
     }, {});
@@ -342,47 +347,53 @@ var VirtueClient = class {
   /**
    * @description Get Vault<token> object
    */
-  async getVault(coinSymbol) {
+  async getVault(token) {
     const res = await this.client.getObject({
-      id: VAULT_MAP[coinSymbol].vault.objectId,
+      id: VAULT_MAP[token].vault.objectId,
       options: {
         showContent: true
       }
     });
     const fields = getObjectFields(res);
-    return parseVaultObject(coinSymbol, fields);
+    return parseVaultObject(token, fields);
   }
   async getPositionsByDebtor(debtor) {
     const vaults = await this.getAllVaults();
     const positions = [];
     for (const vault of Object.values(vaults)) {
       const tableId = vault.bottleTableId;
-      const positionRes = await this.client.getDynamicFieldObject({
+      const res = await this.client.getDynamicFieldObject({
         parentId: tableId,
         name: {
           type: "address",
           value: debtor
         }
       });
-      const positionData = getObjectFields(positionRes);
-      if (!positionData) continue;
-      positions.push(parsePositionObject(vault.token, positionData));
+      const obj = getObjectFields(res);
+      if (!obj) continue;
+      const response = getObjectFields(
+        obj.value.fields.value
+      );
+      positions.push(parsePositionObject(vault.token, response));
     }
     return positions;
   }
   async getPosition(debtor, coinSymbol) {
     const vaultInfo = await this.getVault(coinSymbol);
     const tableId = vaultInfo.bottleTableId;
-    const positionRes = await this.client.getDynamicFieldObject({
+    const res = await this.client.getDynamicFieldObject({
       parentId: tableId,
       name: {
         type: "address",
         value: debtor
       }
     });
-    const positionData = getObjectFields(positionRes);
-    if (!positionData) return;
-    return parsePositionObject(coinSymbol, positionData);
+    const obj = getObjectFields(res);
+    if (!obj) return;
+    const response = getObjectFields(
+      obj.value.fields.value
+    );
+    return parsePositionObject(coinSymbol, response);
   }
   /**
    * @description Create a price collector

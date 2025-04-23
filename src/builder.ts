@@ -1,8 +1,8 @@
 import { Transaction } from "@iota/iota-sdk/transactions";
-import { getInputCoins } from "./utils";
-import { VirtueClient } from "./client";
-import { COINS_TYPE_LIST } from "./constants";
-import { COLLATERAL_COIN } from "./types";
+import { COINS_TYPE_LIST } from "@/constants";
+import { VirtueClient } from "@/client";
+import { COLLATERAL_COIN } from "@/types";
+import { getInputCoins } from "@/utils";
 
 /* ----- Manage Position Builder ----- */
 export async function buildManagePositionTx(

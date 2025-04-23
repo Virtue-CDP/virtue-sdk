@@ -58,6 +58,13 @@ type VaultResponse = {
 type PositionResponse = {
     coll_amount: string;
     debt_amount: string;
+    interest_buffer: string;
+    interest_unit: {
+        type: string;
+        fields: {
+            value: string;
+        };
+    };
 };
 
 type VaultInfo = {
@@ -100,7 +107,7 @@ declare class VirtueClient {
     /**
      * @description Get Vault<token> object
      */
-    getVault(coinSymbol: COLLATERAL_COIN): Promise<VaultInfo>;
+    getVault(token: COLLATERAL_COIN): Promise<VaultInfo>;
     getPositionsByDebtor(debtor: string): Promise<Position[]>;
     getPosition(debtor: string, coinSymbol: COLLATERAL_COIN): Promise<Position | undefined>;
     /**

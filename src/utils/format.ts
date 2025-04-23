@@ -1,5 +1,5 @@
 import { COIN, COLLATERAL_COIN } from "@/types";
-import { COINS_TYPE_LIST, ORIGINAL_ORACLE_PACKAGE_ID } from "../constants";
+import { COINS_TYPE_LIST, ORIGINAL_ORACLE_PACKAGE_ID } from "@/constants";
 
 export function getObjectNames(objectTypes: string[]) {
   const accept_coin_type = Object.values(COINS_TYPE_LIST);
