@@ -128,10 +128,11 @@ export class VirtueClient {
       const obj = getObjectFields(res);
       if (!obj) continue;
 
-      const response = getObjectFields(
-        obj.value.fields.value,
-      ) as PositionResponse;
-      positions.push(parsePositionObject(vault.token, response));
+      const response = obj.value.fields.value as PositionResponse;
+      const position = parsePositionObject(response);
+      if (position) {
+        positions.push(position);
+      }
     }
 
     return positions;
@@ -139,9 +140,9 @@ export class VirtueClient {
 
   async getPosition(
     debtor: string,
-    coinSymbol: COLLATERAL_COIN,
+    collateral: COLLATERAL_COIN,
   ): Promise<Position | undefined> {
-    const vaultInfo = await this.getVault(coinSymbol);
+    const vaultInfo = await this.getVault(collateral);
     const tableId = vaultInfo.bottleTableId;
     const res = await this.client.getDynamicFieldObject({
       parentId: tableId,
@@ -156,7 +157,7 @@ export class VirtueClient {
     const response = getObjectFields(
       obj.value.fields.value,
     ) as PositionResponse;
-    return parsePositionObject(coinSymbol, response);
+    return parsePositionObject(response);
   }
 
   /**

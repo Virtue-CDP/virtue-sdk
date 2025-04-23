@@ -89,25 +89,10 @@ var getCoinType = (str) => {
   const startIndex = str.indexOf("<");
   const endIndex = str.lastIndexOf(">");
   if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    return str.slice(startIndex + 1, endIndex);
+    const coinType = str.slice(startIndex + 1, endIndex);
+    return coinType === "0x2::iota::IOTA" ? COINS_TYPE_LIST.IOTA : coinType;
   }
   return null;
-};
-var getCoinTypeFromTank = (tankType) => {
-  const tankGroup = tankType.split("::tank::Tank");
-  if (tankGroup.length < 2) return null;
-  const coinGroup = (getCoinType(tankGroup[1]) ?? "").split(", ");
-  if (coinGroup.length < 2) return null;
-  const coinType = coinGroup[1].trim();
-  return coinType;
-};
-var getCoinTypeFromPipe = (pipeType) => {
-  const pipeGroup = pipeType.split("::pipe::Pipe");
-  if (pipeGroup.length < 2) return null;
-  const coinGroup = (getCoinType(pipeGroup[1]) ?? "").split(", ");
-  if (coinGroup.length < 2) return null;
-  const coinType = coinGroup[0].trim();
-  return coinType;
 };
 var getCoinSymbol = (coinType) => {
   const coin = Object.keys(COINS_TYPE_LIST).find(
@@ -293,13 +278,16 @@ var parseVaultObject = (coinSymbol, fields) => {
   };
   return vault;
 };
-var parsePositionObject = (coinSymbol, fields) => {
-  const position = {
-    token: coinSymbol,
-    collAmount: fields.coll_amount,
-    debtAmount: fields.debt_amount
+var parsePositionObject = (resp) => {
+  const collateral = getCoinSymbol(getCoinType(resp.type) ?? "");
+  if (!collateral) {
+    return;
+  }
+  return {
+    collateral,
+    collAmount: resp.fields.coll_amount,
+    debtAmount: resp.fields.debt_amount
   };
-  return position;
 };
 
 // src/client.ts
@@ -371,15 +359,16 @@ var VirtueClient = class {
       });
       const obj = getObjectFields(res);
       if (!obj) continue;
-      const response = getObjectFields(
-        obj.value.fields.value
-      );
-      positions.push(parsePositionObject(vault.token, response));
+      const response = obj.value.fields.value;
+      const position = parsePositionObject(response);
+      if (position) {
+        positions.push(position);
+      }
     }
     return positions;
   }
-  async getPosition(debtor, coinSymbol) {
-    const vaultInfo = await this.getVault(coinSymbol);
+  async getPosition(debtor, collateral) {
+    const vaultInfo = await this.getVault(collateral);
     const tableId = vaultInfo.bottleTableId;
     const res = await this.client.getDynamicFieldObject({
       parentId: tableId,
@@ -393,7 +382,7 @@ var VirtueClient = class {
     const response = getObjectFields(
       obj.value.fields.value
     );
-    return parsePositionObject(coinSymbol, response);
+    return parsePositionObject(response);
   }
   /**
    * @description Create a price collector
@@ -557,8 +546,6 @@ export {
   formatUnits,
   getCoinSymbol,
   getCoinType,
-  getCoinTypeFromPipe,
-  getCoinTypeFromTank,
   getInputCoins,
   getIotaObjectData,
   getMainCoin,

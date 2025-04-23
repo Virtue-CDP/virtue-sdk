@@ -1,8 +1,17 @@
-import { COLLATERAL_COIN, PositionResponse, VaultResponse } from "@/types";
-
+import {
+  COLLATERAL_COIN,
+  Position,
+  PositionResponse,
+  VaultInfo,
+  VaultResponse,
+} from "@/types";
+import { getCoinSymbol, getCoinType } from "./format";
 
 // Convert response into vault object
-export const parseVaultObject = (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => {
+export const parseVaultObject = (
+  coinSymbol: COLLATERAL_COIN,
+  fields: VaultResponse,
+): VaultInfo => {
   const vault = {
     token: coinSymbol,
     baseFeeRate:
@@ -19,16 +28,21 @@ export const parseVaultObject = (coinSymbol: COLLATERAL_COIN, fields: VaultRespo
     minBottleSize: fields.min_debt_amount,
   };
 
-  return vault
-}
+  return vault;
+};
 
 // Convert response into position object
-export const parsePositionObject = (coinSymbol: COLLATERAL_COIN, fields: PositionResponse) => {
-  const position = {
-    token: coinSymbol,
-    collAmount: fields.coll_amount,
-    debtAmount: fields.debt_amount,
-  };
+export const parsePositionObject = (
+  resp: PositionResponse,
+): Position | undefined => {
+  const collateral = getCoinSymbol(getCoinType(resp.type) ?? "");
+  if (!collateral) {
+    return;
+  }
 
-  return position
-}
+  return {
+    collateral: collateral as COLLATERAL_COIN,
+    collAmount: resp.fields.coll_amount,
+    debtAmount: resp.fields.debt_amount,
+  };
+};

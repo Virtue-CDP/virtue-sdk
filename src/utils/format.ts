@@ -25,31 +25,11 @@ export const getCoinType = (str: string) => {
   const endIndex = str.lastIndexOf(">");
 
   if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    return str.slice(startIndex + 1, endIndex);
+    const coinType = str.slice(startIndex + 1, endIndex);
+    return coinType === "0x2::iota::IOTA" ? COINS_TYPE_LIST.IOTA : coinType;
   }
 
   return null;
-};
-export const getCoinTypeFromTank = (tankType: string) => {
-  const tankGroup = tankType.split("::tank::Tank");
-  if (tankGroup.length < 2) return null;
-
-  const coinGroup = (getCoinType(tankGroup[1]) ?? "").split(", ");
-  if (coinGroup.length < 2) return null;
-
-  const coinType = coinGroup[1].trim();
-  return coinType;
-};
-
-export const getCoinTypeFromPipe = (pipeType: string) => {
-  const pipeGroup = pipeType.split("::pipe::Pipe");
-  if (pipeGroup.length < 2) return null;
-
-  const coinGroup = (getCoinType(pipeGroup[1]) ?? "").split(", ");
-  if (coinGroup.length < 2) return null;
-
-  const coinType = coinGroup[0].trim();
-  return coinType;
 };
 
 export const getCoinSymbol = (coinType: string) => {

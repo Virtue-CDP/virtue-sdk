@@ -89,25 +89,10 @@ var getCoinType = (str) => {
   const startIndex = str.indexOf("<");
   const endIndex = str.lastIndexOf(">");
   if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    return str.slice(startIndex + 1, endIndex);
+    const coinType = str.slice(startIndex + 1, endIndex);
+    return coinType === "0x2::iota::IOTA" ? COINS_TYPE_LIST.IOTA : coinType;
   }
   return null;
-};
-var getCoinTypeFromTank = (tankType) => {
-  const tankGroup = tankType.split("::tank::Tank");
-  if (tankGroup.length < 2) return null;
-  const coinGroup = (_nullishCoalesce(getCoinType(tankGroup[1]), () => ( ""))).split(", ");
-  if (coinGroup.length < 2) return null;
-  const coinType = coinGroup[1].trim();
-  return coinType;
-};
-var getCoinTypeFromPipe = (pipeType) => {
-  const pipeGroup = pipeType.split("::pipe::Pipe");
-  if (pipeGroup.length < 2) return null;
-  const coinGroup = (_nullishCoalesce(getCoinType(pipeGroup[1]), () => ( ""))).split(", ");
-  if (coinGroup.length < 2) return null;
-  const coinType = coinGroup[0].trim();
-  return coinType;
 };
 var getCoinSymbol = (coinType) => {
   const coin = Object.keys(COINS_TYPE_LIST).find(
@@ -293,13 +278,16 @@ var parseVaultObject = (coinSymbol, fields) => {
   };
   return vault;
 };
-var parsePositionObject = (coinSymbol, fields) => {
-  const position = {
-    token: coinSymbol,
-    collAmount: fields.coll_amount,
-    debtAmount: fields.debt_amount
+var parsePositionObject = (resp) => {
+  const collateral = getCoinSymbol(_nullishCoalesce(getCoinType(resp.type), () => ( "")));
+  if (!collateral) {
+    return;
+  }
+  return {
+    collateral,
+    collAmount: resp.fields.coll_amount,
+    debtAmount: resp.fields.debt_amount
   };
-  return position;
 };
 
 // src/client.ts
@@ -371,15 +359,16 @@ var VirtueClient = class {
       });
       const obj = getObjectFields(res);
       if (!obj) continue;
-      const response = getObjectFields(
-        obj.value.fields.value
-      );
-      positions.push(parsePositionObject(vault.token, response));
+      const response = obj.value.fields.value;
+      const position = parsePositionObject(response);
+      if (position) {
+        positions.push(position);
+      }
     }
     return positions;
   }
-  async getPosition(debtor, coinSymbol) {
-    const vaultInfo = await this.getVault(coinSymbol);
+  async getPosition(debtor, collateral) {
+    const vaultInfo = await this.getVault(collateral);
     const tableId = vaultInfo.bottleTableId;
     const res = await this.client.getDynamicFieldObject({
       parentId: tableId,
@@ -393,7 +382,7 @@ var VirtueClient = class {
     const response = getObjectFields(
       obj.value.fields.value
     );
-    return parsePositionObject(coinSymbol, response);
+    return parsePositionObject(response);
   }
   /**
    * @description Create a price collector
@@ -568,7 +557,5 @@ async function buildManagePositionTx(client, tx, sender, collateralSymbol, colla
 
 
 
-
-
-exports.CDP_PACKAGE_ID = CDP_PACKAGE_ID; exports.CDP_VERSION_OBJ = CDP_VERSION_OBJ; exports.CLOCK_OBJ = CLOCK_OBJ; exports.COINS_TYPE_LIST = COINS_TYPE_LIST; exports.COIN_DECIMALS = COIN_DECIMALS; exports.FRAMEWORK_PACKAGE_ID = FRAMEWORK_PACKAGE_ID; exports.ORACLE_PACKAGE_ID = ORACLE_PACKAGE_ID; exports.ORIGINAL_CDP_PACKAGE_ID = ORIGINAL_CDP_PACKAGE_ID; exports.ORIGINAL_FRAMEWORK_PACKAGE_ID = ORIGINAL_FRAMEWORK_PACKAGE_ID; exports.ORIGINAL_ORACLE_PACKAGE_ID = ORIGINAL_ORACLE_PACKAGE_ID; exports.ORIGINAL_VUSD_PACKAGE_ID = ORIGINAL_VUSD_PACKAGE_ID; exports.ObjectContentFields = ObjectContentFields; exports.TESTNET_PRICE_FEED_OBJ = TESTNET_PRICE_FEED_OBJ; exports.TESTNET_PRICE_PACKAGE_ID = TESTNET_PRICE_PACKAGE_ID; exports.TREASURY_OBJ = TREASURY_OBJ; exports.U64FromBytes = U64FromBytes; exports.VAULT_MAP = VAULT_MAP; exports.VUSD_PACKAGE_ID = VUSD_PACKAGE_ID; exports.VirtueClient = VirtueClient; exports.buildManagePositionTx = buildManagePositionTx; exports.coinFromBalance = coinFromBalance; exports.coinIntoBalance = coinIntoBalance; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getCoinTypeFromPipe = getCoinTypeFromPipe; exports.getCoinTypeFromTank = getCoinTypeFromTank; exports.getInputCoins = getInputCoins; exports.getIotaObjectData = getIotaObjectData; exports.getMainCoin = getMainCoin; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.getPriceResultType = getPriceResultType; exports.parsePositionObject = parsePositionObject; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
+exports.CDP_PACKAGE_ID = CDP_PACKAGE_ID; exports.CDP_VERSION_OBJ = CDP_VERSION_OBJ; exports.CLOCK_OBJ = CLOCK_OBJ; exports.COINS_TYPE_LIST = COINS_TYPE_LIST; exports.COIN_DECIMALS = COIN_DECIMALS; exports.FRAMEWORK_PACKAGE_ID = FRAMEWORK_PACKAGE_ID; exports.ORACLE_PACKAGE_ID = ORACLE_PACKAGE_ID; exports.ORIGINAL_CDP_PACKAGE_ID = ORIGINAL_CDP_PACKAGE_ID; exports.ORIGINAL_FRAMEWORK_PACKAGE_ID = ORIGINAL_FRAMEWORK_PACKAGE_ID; exports.ORIGINAL_ORACLE_PACKAGE_ID = ORIGINAL_ORACLE_PACKAGE_ID; exports.ORIGINAL_VUSD_PACKAGE_ID = ORIGINAL_VUSD_PACKAGE_ID; exports.ObjectContentFields = ObjectContentFields; exports.TESTNET_PRICE_FEED_OBJ = TESTNET_PRICE_FEED_OBJ; exports.TESTNET_PRICE_PACKAGE_ID = TESTNET_PRICE_PACKAGE_ID; exports.TREASURY_OBJ = TREASURY_OBJ; exports.U64FromBytes = U64FromBytes; exports.VAULT_MAP = VAULT_MAP; exports.VUSD_PACKAGE_ID = VUSD_PACKAGE_ID; exports.VirtueClient = VirtueClient; exports.buildManagePositionTx = buildManagePositionTx; exports.coinFromBalance = coinFromBalance; exports.coinIntoBalance = coinIntoBalance; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getInputCoins = getInputCoins; exports.getIotaObjectData = getIotaObjectData; exports.getMainCoin = getMainCoin; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.getPriceResultType = getPriceResultType; exports.parsePositionObject = parsePositionObject; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
 //# sourceMappingURL=index.js.map
