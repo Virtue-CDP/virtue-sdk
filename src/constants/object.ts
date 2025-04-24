@@ -70,9 +70,9 @@ export const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo> = {
   stIOTA: {
     priceAggregater: {
       objectId:
-        "0xad71067ef6b3724bf9db065e40f5e34ebf1252e203a964b04b22cef0b953ebff",
+        "0x0898681c27fa8912905f97a9803c63d7e56abcbac7175f686325eddb215efebd",
       mutable: true,
-      initialSharedVersion: 237544292,
+      initialSharedVersion: 246871816,
     },
     vault: {
       objectId:
