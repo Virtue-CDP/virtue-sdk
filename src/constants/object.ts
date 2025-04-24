@@ -76,9 +76,9 @@ export const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo> = {
     },
     vault: {
       objectId:
-        "0xdef4f5ec71ad943a536b4032a7c64003c9c580c278eb564d381e8f8014e6970c",
+        "0xc6b28c98e0c1c6fa282affd3b8db8e9a5ed143aed4e3b5bd1d1bc6f34dad3861",
       mutable: true,
-      initialSharedVersion: 245030868,
+      initialSharedVersion: 246871815,
     },
   },
 };

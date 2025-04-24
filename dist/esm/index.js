@@ -4,7 +4,7 @@ import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
 // src/constants/coin.ts
 var COINS_TYPE_LIST = {
   IOTA: "0x0000000000000000000000000000000000000000000000000002::iota::IOTA",
-  stIOTA: "0x14f9e69c0076955d5a056260c9667edab184650dba9919f168a37030dd956dc6::cert::CERT",
+  stIOTA: "0x1461ef74f97e83eb024a448ab851f980f4e577a97877069c72b44b5fe9929ee3::cert::CERT",
   VUSD: "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081::vusd::VUSD"
 };
 var COIN_DECIMALS = {
@@ -57,9 +57,9 @@ var VAULT_MAP = {
       initialSharedVersion: 237544292
     },
     vault: {
-      objectId: "0xdef4f5ec71ad943a536b4032a7c64003c9c580c278eb564d381e8f8014e6970c",
+      objectId: "0xc6b28c98e0c1c6fa282affd3b8db8e9a5ed143aed4e3b5bd1d1bc6f34dad3861",
       mutable: true,
-      initialSharedVersion: 245030868
+      initialSharedVersion: 246871815
     }
   }
 };
