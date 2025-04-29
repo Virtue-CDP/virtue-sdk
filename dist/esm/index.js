@@ -71,6 +71,7 @@ var TESTNET_PRICE_FEED_OBJ = {
 };
 
 // src/utils/format.ts
+import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
 function getObjectNames(objectTypes) {
   const accept_coin_type = Object.values(COINS_TYPE_LIST);
   const accept_coin_name = Object.keys(COINS_TYPE_LIST);
@@ -96,7 +97,7 @@ var getCoinType = (str) => {
 };
 var getCoinSymbol = (coinType) => {
   const coin = Object.keys(COINS_TYPE_LIST).find(
-    (key) => COINS_TYPE_LIST[key] === coinType
+    (key) => normalizeIotaAddress(COINS_TYPE_LIST[key]) === normalizeIotaAddress(coinType)
   );
   if (coin) {
     return coin;

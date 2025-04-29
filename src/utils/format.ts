@@ -1,5 +1,6 @@
 import { COIN, COLLATERAL_COIN } from "@/types";
 import { COINS_TYPE_LIST, ORIGINAL_ORACLE_PACKAGE_ID } from "@/constants";
+import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
 
 export function getObjectNames(objectTypes: string[]) {
   const accept_coin_type = Object.values(COINS_TYPE_LIST);
@@ -34,7 +35,9 @@ export const getCoinType = (str: string) => {
 
 export const getCoinSymbol = (coinType: string) => {
   const coin = Object.keys(COINS_TYPE_LIST).find(
-    (key) => COINS_TYPE_LIST[key as COIN] === coinType,
+    (key) =>
+      normalizeIotaAddress(COINS_TYPE_LIST[key as COIN]) ===
+      normalizeIotaAddress(coinType),
   );
   if (coin) {
     return coin as COIN;
