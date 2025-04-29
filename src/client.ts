@@ -24,8 +24,12 @@ import {
   PositionInfo,
   VaultInfoList,
   PositionResponse,
+  PriceMapResponse,
+  COIN,
 } from "@/types";
 import {
+  formatBigInt,
+  getCoinSymbol,
   getObjectFields,
   getPriceResultType,
   parsePositionObject,
@@ -96,6 +100,36 @@ export class VirtueClient {
     }, {} as VaultInfoList);
 
     return vaults;
+  }
+
+  /**
+   * @description Get prices from oracle
+   */
+  async getPrices(): Promise<any> {
+    const res = await this.client.getObject({
+      id: TESTNET_PRICE_FEED_OBJ.objectId,
+      options: {
+        showContent: true,
+      },
+    });
+    const mapObj = getObjectFields(res) as PriceMapResponse;
+    const fields = mapObj.price_map.fields.contents;
+
+    const prices: Record<COIN, number> = {
+      IOTA: 0,
+      stIOTA: 0,
+      VUSD: 1,
+    };
+
+    for (const field of fields) {
+      const coinType = `0x${field.fields.key.fields.name}`;
+      const symbol = getCoinSymbol(coinType);
+      if (!symbol) continue;
+
+      prices[symbol] = formatBigInt(field.fields.value.fields.value);
+    }
+
+    return prices;
   }
 
   /**

@@ -23,4 +23,10 @@ describe("Interacting with VirtueClient", () => {
     console.log(positions);
     expect(positions).toBeDefined();
   });
+
+  it("tests getPrices() function", async () => {
+    const prices = await client.getPrices();
+    console.log(prices);
+    expect(prices).toBeDefined();
+  });
 });

@@ -54,3 +54,31 @@ export type PositionResponse = {
     };
   };
 };
+
+export type PriceMapResponse = {
+  type: string;
+  price_map: {
+    type: string;
+    fields: {
+      contents: PriceObjResponse[];
+    };
+  };
+};
+
+export type PriceObjResponse = {
+  type: string;
+  fields: {
+    key: {
+      type: string;
+      fields: {
+        name: string;
+      };
+    };
+    value: {
+      type: string;
+      fields: {
+        value: string;
+      };
+    };
+  };
+};

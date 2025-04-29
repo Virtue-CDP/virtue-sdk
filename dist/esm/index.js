@@ -3,7 +3,7 @@ import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
 
 // src/constants/coin.ts
 var COINS_TYPE_LIST = {
-  IOTA: "0x0000000000000000000000000000000000000000000000000002::iota::IOTA",
+  IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
   stIOTA: "0x1461ef74f97e83eb024a448ab851f980f4e577a97877069c72b44b5fe9929ee3::cert::CERT",
   VUSD: "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081::vusd::VUSD"
 };
@@ -341,6 +341,31 @@ var VirtueClient = class {
       return acc;
     }, {});
     return vaults;
+  }
+  /**
+   * @description Get prices from oracle
+   */
+  async getPrices() {
+    const res = await this.client.getObject({
+      id: TESTNET_PRICE_FEED_OBJ.objectId,
+      options: {
+        showContent: true
+      }
+    });
+    const mapObj = getObjectFields(res);
+    const fields = mapObj.price_map.fields.contents;
+    const prices = {
+      IOTA: 0,
+      stIOTA: 0,
+      VUSD: 1
+    };
+    for (const field of fields) {
+      const coinType = `0x${field.fields.key.fields.name}`;
+      const symbol = getCoinSymbol(coinType);
+      if (!symbol) continue;
+      prices[symbol] = formatBigInt(field.fields.value.fields.value);
+    }
+    return prices;
   }
   /**
    * @description Get Vault<token> object
