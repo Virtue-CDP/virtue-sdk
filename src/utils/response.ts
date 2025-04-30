@@ -24,6 +24,9 @@ export const parseVaultObject = (
     baseFeeRate: formatBigInt(
       fields.position_table.fields.fee_rate.fields.value ?? 3_000_000,
     ),
+    interestRate: formatBigInt(
+      fields.position_table.fields.interest_rate.fields.value,
+    ),
     minCollateralRatio: formatBigInt(
       fields.liquidation_config.fields.mcr.fields.value,
     ),

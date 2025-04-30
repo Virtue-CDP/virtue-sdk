@@ -3,6 +3,7 @@ import { COLLATERAL_COIN } from "./coin";
 export type VaultInfo = {
   token: COLLATERAL_COIN;
   baseFeeRate: number;
+  interestRate: number;
   bottleTableSize: string;
   bottleTableId: string;
   collateralDecimal: number;
