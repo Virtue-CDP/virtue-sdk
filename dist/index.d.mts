@@ -116,6 +116,13 @@ type PositionInfo = {
     collAmount: string;
     debtAmount: string;
 };
+type StabilityPoolFields = {
+    amount: string;
+};
+type StabilityPoolBalances = {
+    vusdBalance: number;
+    collBalances: Record<COLLATERAL_COIN, number>;
+};
 type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;
 
 declare class VirtueClient {
@@ -137,13 +144,14 @@ declare class VirtueClient {
     /**
      * @description Get prices from oracle
      */
-    getPrices(): Promise<any>;
+    getPrices(): Promise<Record<COIN, number>>;
     /**
      * @description Get Vault<token> object
      */
     getVault(token: COLLATERAL_COIN): Promise<VaultInfo>;
     getPositionsByDebtor(debtor: string): Promise<PositionInfo[]>;
     getPosition(debtor: string, collateral: COLLATERAL_COIN): Promise<PositionInfo | undefined>;
+    getStabilityPoolBalance(account: string): Promise<StabilityPoolBalances>;
     /**
      * @description Create a price collector
      * @param collateral coin symbol, e.g "IOTA"
@@ -175,6 +183,8 @@ declare class VirtueClient {
      * @returns [Coin<T>, COIN<VUSD>]
      */
     managePosition(tx: Transaction, coinSymbol: COLLATERAL_COIN, manageRequest: TransactionArgument, priceResult?: TransactionArgument, insertionPlace?: string): TransactionResult;
+    depositStabilityPool(tx: Transaction, vusdCoin: TransactionArgument): TransactionResult;
+    withdrawStabilityPool(tx: Transaction, tokens: TransactionArgument[], amount: string): TransactionResult;
 }
 
 declare function getObjectNames(objectTypes: string[]): string[];
@@ -209,6 +219,8 @@ declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultRespo
 declare const parsePositionObject: (resp: PositionResponse) => PositionInfo | undefined;
 
 declare function buildManagePositionTx(client: VirtueClient, tx: Transaction, sender: string, collateralSymbol: COLLATERAL_COIN, collateralAmount: string, borrowAmount: string, repaymentAmount: string, withrawAmount: string, insertionPlace?: string, accountObjId?: string, recipient?: string): Promise<void>;
+declare function buildDepositStabilityPoolTx(client: VirtueClient, tx: Transaction, sender: string, vusdAmount: string, recipient?: string): Promise<void>;
+declare function buildWithdrawStabilityPoolTx(client: VirtueClient, tx: Transaction, sender: string, vusdAmount: string, recipient?: string): Promise<boolean>;
 
 declare const COINS_TYPE_LIST: Record<COIN, string>;
 declare const COIN_DECIMALS: Record<COIN, number>;
@@ -217,10 +229,12 @@ declare const ORIGINAL_FRAMEWORK_PACKAGE_ID = "0x6f8dd0377fe5469cd3456350ca13ae1
 declare const ORIGINAL_VUSD_PACKAGE_ID = "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081";
 declare const ORIGINAL_ORACLE_PACKAGE_ID = "0x3eb4e0b2c57fe9844db30c6bb2b775ed18fd775dd9d48955b78bcd0ac0ba8954";
 declare const ORIGINAL_CDP_PACKAGE_ID = "0x0731a9f5cbdb0a4aea3f540280a1a266502017867734240e29edc813074e7f60";
+declare const ORIGINAL_LIQUIDATION_PACKAGE_ID = "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
 declare const FRAMEWORK_PACKAGE_ID = "0x6f8dd0377fe5469cd3456350ca13ae1799655fda06e90191b73ab1c0c0165e8f";
 declare const VUSD_PACKAGE_ID = "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081";
 declare const ORACLE_PACKAGE_ID = "0xbc672e6330ab22078715f86e952ef1353d9f9b217c4579e47ce29eaec6f92655";
-declare const CDP_PACKAGE_ID = "0x229091f5fcf75c094372671ca58caa074c90f99c8975e145b3ffc3d23e49a493";
+declare const CDP_PACKAGE_ID = "0xc0d51cf05743fafd185d275d42df0845549af03c0b5f8961a5f33f70c9b5368d";
+declare const LIQUIDATION_PACKAGE_ID = "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
 declare const CLOCK_OBJ: {
     objectId: string;
     mutable: boolean;
@@ -241,6 +255,7 @@ type VaultObjectInfo = {
     vault: SharedObjectRef;
 };
 declare const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo>;
+declare const STABILITY_POOL_OBJ: SharedObjectRef;
 declare const TESTNET_PRICE_PACKAGE_ID = "0x2de2d918f5940978dc53aae2ea0687a4ca8a6736bd525f15ee17e9529048fa92";
 declare const TESTNET_PRICE_FEED_OBJ: {
     objectId: string;
@@ -248,4 +263,4 @@ declare const TESTNET_PRICE_FEED_OBJ: {
     initialSharedVersion: number;
 };
 
-export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type PositionInfo, type PositionResponse, type PriceMapResponse, type PriceObjResponse, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildManagePositionTx, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, LIQUIDATION_PACKAGE_ID, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_LIQUIDATION_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type PositionInfo, type PositionResponse, type PriceMapResponse, type PriceObjResponse, STABILITY_POOL_OBJ, type StabilityPoolBalances, type StabilityPoolFields, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildDepositStabilityPoolTx, buildManagePositionTx, buildWithdrawStabilityPoolTx, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseUnits, parseVaultObject };

@@ -18,10 +18,12 @@ var ORIGINAL_FRAMEWORK_PACKAGE_ID = "0x6f8dd0377fe5469cd3456350ca13ae1799655fda0
 var ORIGINAL_VUSD_PACKAGE_ID = "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081";
 var ORIGINAL_ORACLE_PACKAGE_ID = "0x3eb4e0b2c57fe9844db30c6bb2b775ed18fd775dd9d48955b78bcd0ac0ba8954";
 var ORIGINAL_CDP_PACKAGE_ID = "0x0731a9f5cbdb0a4aea3f540280a1a266502017867734240e29edc813074e7f60";
+var ORIGINAL_LIQUIDATION_PACKAGE_ID = "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
 var FRAMEWORK_PACKAGE_ID = "0x6f8dd0377fe5469cd3456350ca13ae1799655fda06e90191b73ab1c0c0165e8f";
 var VUSD_PACKAGE_ID = "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081";
 var ORACLE_PACKAGE_ID = "0xbc672e6330ab22078715f86e952ef1353d9f9b217c4579e47ce29eaec6f92655";
-var CDP_PACKAGE_ID = "0x229091f5fcf75c094372671ca58caa074c90f99c8975e145b3ffc3d23e49a493";
+var CDP_PACKAGE_ID = "0xc0d51cf05743fafd185d275d42df0845549af03c0b5f8961a5f33f70c9b5368d";
+var LIQUIDATION_PACKAGE_ID = "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
 var CLOCK_OBJ = {
   objectId: "0x0000000000000000000000000000000000000000000000000000000000000006",
   mutable: false,
@@ -62,6 +64,11 @@ var VAULT_MAP = {
       initialSharedVersion: 246871815
     }
   }
+};
+var STABILITY_POOL_OBJ = {
+  objectId: "0x963b3d757dcd5ad14773a503eb481143b64d3686aebdf6a90443d908582188e0",
+  initialSharedVersion: 252695564,
+  mutable: true
 };
 var TESTNET_PRICE_PACKAGE_ID = "0x2de2d918f5940978dc53aae2ea0687a4ca8a6736bd525f15ee17e9529048fa92";
 var TESTNET_PRICE_FEED_OBJ = {
@@ -423,6 +430,43 @@ var VirtueClient = class {
     );
     return parsePositionObject(response);
   }
+  async getStabilityPoolBalance(account) {
+    const tokensRes = await this.client.getOwnedObjects({
+      owner: account,
+      filter: {
+        StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`
+      },
+      options: {
+        showContent: true
+      }
+    });
+    if (tokensRes.data) {
+      const vusdBalances = tokensRes.data.map((token) => {
+        if (token.data?.content?.dataType === "moveObject") {
+          return Number(
+            token.data.content.fields.amount
+          );
+        } else {
+          return 0;
+        }
+      });
+      return {
+        vusdBalance: vusdBalances.reduce((x, y) => x + y, 0),
+        collBalances: {
+          IOTA: 0,
+          stIOTA: 0
+        }
+      };
+    } else {
+      return {
+        vusdBalance: 0,
+        collBalances: {
+          IOTA: 0,
+          stIOTA: 0
+        }
+      };
+    }
+  }
   /**
    * @description Create a price collector
    * @param collateral coin symbol, e.g "IOTA"
@@ -520,6 +564,27 @@ var VirtueClient = class {
       ]
     });
   }
+  depositStabilityPool(tx, vusdCoin) {
+    return tx.moveCall({
+      target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::deposit`,
+      arguments: [tx.sharedObjectRef(STABILITY_POOL_OBJ), vusdCoin]
+    });
+  }
+  withdrawStabilityPool(tx, tokens, amount) {
+    const stabilityPool = tx.sharedObjectRef(STABILITY_POOL_OBJ);
+    const [mainCoin, ...otherCoins] = tokens.map((token) => {
+      const [vusdCoin] = tx.moveCall({
+        target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::withdraw`,
+        arguments: [stabilityPool, token]
+      });
+      return vusdCoin;
+    });
+    if (otherCoins.length > 0) {
+      tx.mergeCoins(mainCoin, otherCoins);
+    }
+    const [redepositCoin] = tx.splitCoins(mainCoin, [amount]);
+    return this.depositStabilityPool(tx, redepositCoin);
+  }
 };
 
 // src/builder.ts
@@ -559,6 +624,37 @@ async function buildManagePositionTx(client, tx, sender, collateralSymbol, colla
   );
   tx.transferObjects([collCoin, vusdCoin], recipient ?? sender);
 }
+async function buildDepositStabilityPoolTx(client, tx, sender, vusdAmount, recipient) {
+  const iotaClient = client.getClient();
+  const [inputCoin] = await getInputCoins(
+    tx,
+    iotaClient,
+    sender,
+    COINS_TYPE_LIST.VUSD,
+    vusdAmount
+  );
+  const [token] = client.depositStabilityPool(tx, inputCoin);
+  tx.transferObjects([token], recipient ?? sender);
+}
+async function buildWithdrawStabilityPoolTx(client, tx, sender, vusdAmount, recipient) {
+  const iotaClient = client.getClient();
+  const tokensRes = await iotaClient.getOwnedObjects({
+    owner: sender,
+    filter: {
+      StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`
+    }
+  });
+  if (tokensRes.data) {
+    const tokens = tokensRes.data.map(
+      (token) => tx.objectRef(token.data)
+    );
+    const [coin] = client.withdrawStabilityPool(tx, tokens, vusdAmount);
+    tx.transferObjects([coin], recipient ?? sender);
+    return true;
+  } else {
+    return false;
+  }
+}
 export {
   CDP_PACKAGE_ID,
   CDP_VERSION_OBJ,
@@ -566,12 +662,15 @@ export {
   COINS_TYPE_LIST,
   COIN_DECIMALS,
   FRAMEWORK_PACKAGE_ID,
+  LIQUIDATION_PACKAGE_ID,
   ORACLE_PACKAGE_ID,
   ORIGINAL_CDP_PACKAGE_ID,
   ORIGINAL_FRAMEWORK_PACKAGE_ID,
+  ORIGINAL_LIQUIDATION_PACKAGE_ID,
   ORIGINAL_ORACLE_PACKAGE_ID,
   ORIGINAL_VUSD_PACKAGE_ID,
   ObjectContentFields,
+  STABILITY_POOL_OBJ,
   TESTNET_PRICE_FEED_OBJ,
   TESTNET_PRICE_PACKAGE_ID,
   TREASURY_OBJ,
@@ -579,7 +678,9 @@ export {
   VAULT_MAP,
   VUSD_PACKAGE_ID,
   VirtueClient,
+  buildDepositStabilityPoolTx,
   buildManagePositionTx,
+  buildWithdrawStabilityPoolTx,
   coinFromBalance,
   coinIntoBalance,
   formatBigInt,

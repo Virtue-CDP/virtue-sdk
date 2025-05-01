@@ -1,8 +1,9 @@
 import { Transaction } from "@iota/iota-sdk/transactions";
-import { COINS_TYPE_LIST } from "@/constants";
+import { COINS_TYPE_LIST, ORIGINAL_LIQUIDATION_PACKAGE_ID } from "@/constants";
 import { VirtueClient } from "@/client";
 import { COLLATERAL_COIN } from "@/types";
 import { getInputCoins } from "@/utils";
+import { IotaObjectData } from "@iota/iota-sdk/dist/cjs/client";
 
 /* ----- Manage Position Builder ----- */
 export async function buildManagePositionTx(
@@ -55,4 +56,49 @@ export async function buildManagePositionTx(
     insertionPlace,
   );
   tx.transferObjects([collCoin, vusdCoin], recipient ?? sender);
+}
+
+export async function buildDepositStabilityPoolTx(
+  client: VirtueClient,
+  tx: Transaction,
+  sender: string,
+  vusdAmount: string,
+  recipient?: string,
+) {
+  const iotaClient = client.getClient();
+  const [inputCoin] = await getInputCoins(
+    tx,
+    iotaClient,
+    sender,
+    COINS_TYPE_LIST.VUSD,
+    vusdAmount,
+  );
+  const [token] = client.depositStabilityPool(tx, inputCoin);
+  tx.transferObjects([token], recipient ?? sender);
+}
+
+export async function buildWithdrawStabilityPoolTx(
+  client: VirtueClient,
+  tx: Transaction,
+  sender: string,
+  vusdAmount: string,
+  recipient?: string,
+): Promise<boolean> {
+  const iotaClient = client.getClient();
+  const tokensRes = await iotaClient.getOwnedObjects({
+    owner: sender,
+    filter: {
+      StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`,
+    },
+  });
+  if (tokensRes.data) {
+    const tokens = tokensRes.data.map((token) =>
+      tx.objectRef(token.data as IotaObjectData),
+    );
+    const [coin] = client.withdrawStabilityPool(tx, tokens, vusdAmount);
+    tx.transferObjects([coin], recipient ?? sender);
+    return true;
+  } else {
+    return false;
+  }
 }

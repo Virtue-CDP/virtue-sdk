@@ -22,4 +22,13 @@ export type PositionInfo = {
   debtAmount: string;
 };
 
+export type StabilityPoolFields = {
+  amount: string;
+};
+
+export type StabilityPoolBalances = {
+  vusdBalance: number;
+  collBalances: Record<COLLATERAL_COIN, number>;
+};
+
 export type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;

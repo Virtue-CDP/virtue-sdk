@@ -11,6 +11,8 @@ export const ORIGINAL_ORACLE_PACKAGE_ID =
   "0x3eb4e0b2c57fe9844db30c6bb2b775ed18fd775dd9d48955b78bcd0ac0ba8954";
 export const ORIGINAL_CDP_PACKAGE_ID =
   "0x0731a9f5cbdb0a4aea3f540280a1a266502017867734240e29edc813074e7f60";
+export const ORIGINAL_LIQUIDATION_PACKAGE_ID =
+  "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
 
 /// Latest Package IDs
 
@@ -21,7 +23,9 @@ export const VUSD_PACKAGE_ID =
 export const ORACLE_PACKAGE_ID =
   "0xbc672e6330ab22078715f86e952ef1353d9f9b217c4579e47ce29eaec6f92655";
 export const CDP_PACKAGE_ID =
-  "0x229091f5fcf75c094372671ca58caa074c90f99c8975e145b3ffc3d23e49a493";
+  "0xc0d51cf05743fafd185d275d42df0845549af03c0b5f8961a5f33f70c9b5368d";
+export const LIQUIDATION_PACKAGE_ID =
+  "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
 
 /// Shared Objects
 
@@ -81,6 +85,13 @@ export const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo> = {
       initialSharedVersion: 246871815,
     },
   },
+};
+
+export const STABILITY_POOL_OBJ: SharedObjectRef = {
+  objectId:
+    "0x963b3d757dcd5ad14773a503eb481143b64d3686aebdf6a90443d908582188e0",
+  initialSharedVersion: 252695564,
+  mutable: true,
 };
 
 // only on testnet

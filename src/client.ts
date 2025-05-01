@@ -11,7 +11,10 @@ import {
   CLOCK_OBJ,
   COINS_TYPE_LIST,
   FRAMEWORK_PACKAGE_ID,
+  LIQUIDATION_PACKAGE_ID,
   ORACLE_PACKAGE_ID,
+  ORIGINAL_LIQUIDATION_PACKAGE_ID,
+  STABILITY_POOL_OBJ,
   TESTNET_PRICE_FEED_OBJ,
   TESTNET_PRICE_PACKAGE_ID,
   TREASURY_OBJ,
@@ -26,6 +29,8 @@ import {
   PositionResponse,
   PriceMapResponse,
   COIN,
+  StabilityPoolBalances,
+  StabilityPoolFields,
 } from "@/types";
 import {
   formatBigInt,
@@ -105,7 +110,7 @@ export class VirtueClient {
   /**
    * @description Get prices from oracle
    */
-  async getPrices(): Promise<any> {
+  async getPrices() {
     const res = await this.client.getObject({
       id: TESTNET_PRICE_FEED_OBJ.objectId,
       options: {
@@ -192,6 +197,46 @@ export class VirtueClient {
       obj.value.fields.value,
     ) as PositionResponse;
     return parsePositionObject(response);
+  }
+
+  async getStabilityPoolBalance(
+    account: string,
+  ): Promise<StabilityPoolBalances> {
+    const tokensRes = await this.client.getOwnedObjects({
+      owner: account,
+      filter: {
+        StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`,
+      },
+      options: {
+        showContent: true,
+      },
+    });
+    if (tokensRes.data) {
+      const vusdBalances = tokensRes.data.map((token) => {
+        if (token.data?.content?.dataType === "moveObject") {
+          return Number(
+            (token.data.content.fields as StabilityPoolFields).amount,
+          );
+        } else {
+          return 0;
+        }
+      });
+      return {
+        vusdBalance: vusdBalances.reduce((x, y) => x + y, 0),
+        collBalances: {
+          IOTA: 0,
+          stIOTA: 0,
+        },
+      };
+    } else {
+      return {
+        vusdBalance: 0,
+        collBalances: {
+          IOTA: 0,
+          stIOTA: 0,
+        },
+      };
+    }
   }
 
   /**
@@ -320,5 +365,35 @@ export class VirtueClient {
         tx.pure.option("address", insertionPlace),
       ],
     });
+  }
+
+  depositStabilityPool(
+    tx: Transaction,
+    vusdCoin: TransactionArgument,
+  ): TransactionResult {
+    return tx.moveCall({
+      target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::deposit`,
+      arguments: [tx.sharedObjectRef(STABILITY_POOL_OBJ), vusdCoin],
+    });
+  }
+
+  withdrawStabilityPool(
+    tx: Transaction,
+    tokens: TransactionArgument[],
+    amount: string,
+  ): TransactionResult {
+    const stabilityPool = tx.sharedObjectRef(STABILITY_POOL_OBJ);
+    const [mainCoin, ...otherCoins] = tokens.map((token) => {
+      const [vusdCoin] = tx.moveCall({
+        target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::withdraw`,
+        arguments: [stabilityPool, token],
+      });
+      return vusdCoin;
+    });
+    if (otherCoins.length > 0) {
+      tx.mergeCoins(mainCoin, otherCoins);
+    }
+    const [redepositCoin] = tx.splitCoins(mainCoin, [amount]);
+    return this.depositStabilityPool(tx, redepositCoin);
   }
 }
