@@ -306,7 +306,7 @@ var parsePositionObject = (resp) => {
   }
   return {
     collateral,
-    collAmount: resp.fields.coll_amount,
+    collAmount: (+resp.fields.coll_amount + resp.fields.interest_buffer).toString(),
     debtAmount: resp.fields.debt_amount
   };
 };
@@ -442,10 +442,9 @@ var VirtueClient = class {
     });
     if (tokensRes.data) {
       const vusdBalances = tokensRes.data.map((token) => {
-        if (token.data?.content?.dataType === "moveObject") {
-          return Number(
-            token.data.content.fields.amount
-          );
+        const tokenFiels = getObjectFields(token);
+        if (tokenFiels) {
+          return tokenFiels.amount;
         } else {
           return 0;
         }

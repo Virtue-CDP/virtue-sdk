@@ -30,7 +30,6 @@ import {
   PriceMapResponse,
   COIN,
   StabilityPoolBalances,
-  StabilityPoolFields,
 } from "@/types";
 import {
   formatBigInt,
@@ -213,10 +212,9 @@ export class VirtueClient {
     });
     if (tokensRes.data) {
       const vusdBalances = tokensRes.data.map((token) => {
-        if (token.data?.content?.dataType === "moveObject") {
-          return Number(
-            (token.data.content.fields as StabilityPoolFields).amount,
-          );
+        const tokenFiels = getObjectFields(token);
+        if (tokenFiels) {
+          return tokenFiels.amount;
         } else {
           return 0;
         }
