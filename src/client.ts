@@ -394,6 +394,7 @@ export class VirtueClient {
       tx.mergeCoins(mainCoin, otherCoins);
     }
     const [redepositCoin] = tx.splitCoins(mainCoin, [amount]);
-    return this.depositStabilityPool(tx, redepositCoin);
+    const [token] = this.depositStabilityPool(tx, redepositCoin);
+    return [mainCoin, token] as TransactionResult;
   }
 }

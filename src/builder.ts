@@ -55,7 +55,12 @@ export async function buildManagePositionTx(
     priceResult,
     insertionPlace,
   );
-  tx.transferObjects([collCoin, vusdCoin], recipient ?? sender);
+  if (recipient === "StabilityPool") {
+    client.depositStabilityPool(tx, vusdCoin);
+    tx.transferObjects([collCoin], recipient ?? sender);
+  } else {
+    tx.transferObjects([collCoin, vusdCoin], recipient ?? sender);
+  }
 }
 
 export async function buildDepositStabilityPoolTx(
@@ -95,8 +100,8 @@ export async function buildWithdrawStabilityPoolTx(
     const tokens = tokensRes.data.map((token) =>
       tx.objectRef(token.data as IotaObjectData),
     );
-    const [coin] = client.withdrawStabilityPool(tx, tokens, vusdAmount);
-    tx.transferObjects([coin], recipient ?? sender);
+    const [coin, token] = client.withdrawStabilityPool(tx, tokens, vusdAmount);
+    tx.transferObjects([coin, token], recipient ?? sender);
     return true;
   } else {
     return false;
