@@ -571,10 +571,10 @@ var VirtueClient = class {
   }
   withdrawStabilityPool(tx, tokens, amount) {
     const stabilityPool = tx.sharedObjectRef(STABILITY_POOL_OBJ);
-    const [mainCoin, ...otherCoins] = tokens.map((token) => {
+    const [mainCoin, ...otherCoins] = tokens.map((token2) => {
       const [vusdCoin] = tx.moveCall({
         target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::withdraw`,
-        arguments: [stabilityPool, token]
+        arguments: [stabilityPool, token2]
       });
       return vusdCoin;
     });
@@ -582,7 +582,8 @@ var VirtueClient = class {
       tx.mergeCoins(mainCoin, otherCoins);
     }
     const [redepositCoin] = tx.splitCoins(mainCoin, [amount]);
-    return this.depositStabilityPool(tx, redepositCoin);
+    const [token] = this.depositStabilityPool(tx, redepositCoin);
+    return [mainCoin, token];
   }
 };
 
@@ -621,7 +622,12 @@ async function buildManagePositionTx(client, tx, sender, collateralSymbol, colla
     priceResult,
     insertionPlace
   );
-  tx.transferObjects([collCoin, vusdCoin], recipient ?? sender);
+  if (recipient === "StabilityPool") {
+    client.depositStabilityPool(tx, vusdCoin);
+    tx.transferObjects([collCoin], recipient ?? sender);
+  } else {
+    tx.transferObjects([collCoin, vusdCoin], recipient ?? sender);
+  }
 }
 async function buildDepositStabilityPoolTx(client, tx, sender, vusdAmount, recipient) {
   const iotaClient = client.getClient();
@@ -645,10 +651,10 @@ async function buildWithdrawStabilityPoolTx(client, tx, sender, vusdAmount, reci
   });
   if (tokensRes.data) {
     const tokens = tokensRes.data.map(
-      (token) => tx.objectRef(token.data)
+      (token2) => tx.objectRef(token2.data)
     );
-    const [coin] = client.withdrawStabilityPool(tx, tokens, vusdAmount);
-    tx.transferObjects([coin], recipient ?? sender);
+    const [coin, token] = client.withdrawStabilityPool(tx, tokens, vusdAmount);
+    tx.transferObjects([coin, token], recipient ?? sender);
     return true;
   } else {
     return false;
