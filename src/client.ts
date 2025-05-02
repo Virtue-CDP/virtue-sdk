@@ -199,7 +199,7 @@ export class VirtueClient {
     return parsePositionObject(response);
   }
 
-  async getStabilityPoolBalance(
+  async getStabilityPoolBalances(
     account: string,
   ): Promise<StabilityPoolBalances> {
     const tokensRes = await this.client.getOwnedObjects({
@@ -393,8 +393,8 @@ export class VirtueClient {
     if (otherCoins.length > 0) {
       tx.mergeCoins(mainCoin, otherCoins);
     }
-    const [redepositCoin] = tx.splitCoins(mainCoin, [amount]);
-    const [token] = this.depositStabilityPool(tx, redepositCoin);
-    return [mainCoin, token] as TransactionResult;
+    const [outCoin] = tx.splitCoins(mainCoin, [amount]);
+    const [token] = this.depositStabilityPool(tx, mainCoin);
+    return [outCoin, token] as TransactionResult;
   }
 }

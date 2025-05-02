@@ -148,7 +148,7 @@ declare class VirtueClient {
     getVault(token: COLLATERAL_COIN): Promise<VaultInfo>;
     getPositionsByDebtor(debtor: string): Promise<PositionInfo[]>;
     getPosition(debtor: string, collateral: COLLATERAL_COIN): Promise<PositionInfo | undefined>;
-    getStabilityPoolBalance(account: string): Promise<StabilityPoolBalances>;
+    getStabilityPoolBalances(account: string): Promise<StabilityPoolBalances>;
     /**
      * @description Create a price collector
      * @param collateral coin symbol, e.g "IOTA"
