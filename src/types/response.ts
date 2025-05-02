@@ -82,3 +82,5 @@ export type PriceObjResponse = {
     };
   };
 };
+
+export type StabilityPoolResponse = { balance: string };

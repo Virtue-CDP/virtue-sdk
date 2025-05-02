@@ -95,6 +95,9 @@ type PriceObjResponse = {
         };
     };
 };
+type StabilityPoolResponse = {
+    balance: string;
+};
 
 type VaultInfo = {
     token: COLLATERAL_COIN;
@@ -121,6 +124,9 @@ type StabilityPoolBalances = {
     collBalances: Record<COLLATERAL_COIN, number>;
 };
 type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;
+type StabilityPoolInfo = {
+    vusdBalance: number;
+};
 
 declare class VirtueClient {
     network: string;
@@ -148,6 +154,7 @@ declare class VirtueClient {
     getVault(token: COLLATERAL_COIN): Promise<VaultInfo>;
     getPositionsByDebtor(debtor: string): Promise<PositionInfo[]>;
     getPosition(debtor: string, collateral: COLLATERAL_COIN): Promise<PositionInfo | undefined>;
+    getStabilityPool(): Promise<StabilityPoolInfo>;
     getStabilityPoolBalances(account: string): Promise<StabilityPoolBalances>;
     /**
      * @description Create a price collector
@@ -214,6 +221,7 @@ declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
 declare const parsePositionObject: (resp: PositionResponse) => PositionInfo | undefined;
+declare const parseStabilityPoolObject: (fields: StabilityPoolResponse) => StabilityPoolInfo;
 
 declare function buildManagePositionTx(client: VirtueClient, tx: Transaction, sender: string, collateralSymbol: COLLATERAL_COIN, collateralAmount: string, borrowAmount: string, repaymentAmount: string, withrawAmount: string, insertionPlace?: string, accountObjId?: string, recipient?: string): Promise<void>;
 declare function buildDepositStabilityPoolTx(client: VirtueClient, tx: Transaction, sender: string, vusdAmount: string, recipient?: string): Promise<void>;
@@ -260,4 +268,4 @@ declare const TESTNET_PRICE_FEED_OBJ: {
     initialSharedVersion: number;
 };
 
-export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, LIQUIDATION_PACKAGE_ID, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_LIQUIDATION_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type PositionInfo, type PositionResponse, type PriceMapResponse, type PriceObjResponse, STABILITY_POOL_OBJ, type StabilityPoolBalances, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildDepositStabilityPoolTx, buildManagePositionTx, buildWithdrawStabilityPoolTx, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, LIQUIDATION_PACKAGE_ID, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_LIQUIDATION_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type PositionInfo, type PositionResponse, type PriceMapResponse, type PriceObjResponse, STABILITY_POOL_OBJ, type StabilityPoolBalances, type StabilityPoolInfo, type StabilityPoolResponse, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildDepositStabilityPoolTx, buildManagePositionTx, buildWithdrawStabilityPoolTx, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseStabilityPoolObject, parseUnits, parseVaultObject };

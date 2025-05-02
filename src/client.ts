@@ -31,6 +31,8 @@ import {
   PriceMapResponse,
   COIN,
   StabilityPoolBalances,
+  StabilityPoolResponse,
+  StabilityPoolInfo,
 } from "@/types";
 import {
   formatBigInt,
@@ -38,6 +40,7 @@ import {
   getObjectFields,
   getPriceResultType,
   parsePositionObject,
+  parseStabilityPoolObject,
   parseVaultObject,
 } from "@/utils";
 
@@ -197,6 +200,17 @@ export class VirtueClient {
       obj.value.fields.value,
     ) as PositionResponse;
     return parsePositionObject(response);
+  }
+
+  async getStabilityPool(): Promise<StabilityPoolInfo> {
+    const res = await this.client.getObject({
+      id: STABILITY_POOL_OBJ.objectId,
+      options: {
+        showContent: true,
+      },
+    });
+    const fields = getObjectFields(res) as StabilityPoolResponse;
+    return parseStabilityPoolObject(fields);
   }
 
   async getStabilityPoolBalances(

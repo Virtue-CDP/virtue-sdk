@@ -31,8 +31,14 @@ describe("Interacting with VirtueClient", () => {
   });
 
   it("tests getStabilityBalances() function", async () => {
-    const balances = await client.getStabilityPoolBalance(walletAddress);
+    const balances = await client.getStabilityPoolBalances(walletAddress);
     console.log(balances);
     expect(balances).toBeDefined();
+  });
+
+  it("tests getStabilityPool() function", async () => {
+    const pool = await client.getStabilityPool();
+    console.log(pool);
+    expect(pool).toBeDefined();
   });
 });

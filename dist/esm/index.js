@@ -310,6 +310,11 @@ var parsePositionObject = (resp) => {
     debtAmount: resp.fields.debt_amount
   };
 };
+var parseStabilityPoolObject = (fields) => {
+  return {
+    vusdBalance: formatBigInt(fields.balance, COIN_DECIMALS.VUSD)
+  };
+};
 
 // src/client.ts
 var DUMMY_ADDRESS = "0x0";
@@ -429,6 +434,16 @@ var VirtueClient = class {
       obj.value.fields.value
     );
     return parsePositionObject(response);
+  }
+  async getStabilityPool() {
+    const res = await this.client.getObject({
+      id: STABILITY_POOL_OBJ.objectId,
+      options: {
+        showContent: true
+      }
+    });
+    const fields = getObjectFields(res);
+    return parseStabilityPoolObject(fields);
   }
   async getStabilityPoolBalances(account) {
     const tokensRes = await this.client.getOwnedObjects({
@@ -701,6 +716,7 @@ export {
   getObjectNames,
   getPriceResultType,
   parsePositionObject,
+  parseStabilityPoolObject,
   parseUnits,
   parseVaultObject
 };

@@ -28,3 +28,7 @@ export type StabilityPoolBalances = {
 };
 
 export type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;
+
+export type StabilityPoolInfo = {
+  vusdBalance: number;
+};

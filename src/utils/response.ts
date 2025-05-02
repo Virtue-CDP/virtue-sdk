@@ -2,10 +2,13 @@ import {
   COLLATERAL_COIN,
   PositionInfo,
   PositionResponse,
+  StabilityPoolInfo,
+  StabilityPoolResponse,
   VaultInfo,
   VaultResponse,
 } from "@/types";
 import { formatBigInt, getCoinSymbol, getCoinType } from "./format";
+import { COIN_DECIMALS } from "@/constants";
 
 // Convert response into vault object
 export const parseVaultObject = (
@@ -54,5 +57,13 @@ export const parsePositionObject = (
       +resp.fields.coll_amount + resp.fields.interest_buffer
     ).toString(),
     debtAmount: resp.fields.debt_amount,
+  };
+};
+
+export const parseStabilityPoolObject = (
+  fields: StabilityPoolResponse,
+): StabilityPoolInfo => {
+  return {
+    vusdBalance: formatBigInt(fields.balance, COIN_DECIMALS.VUSD),
   };
 };
