@@ -9,6 +9,7 @@ import {
   CDP_PACKAGE_ID,
   CDP_VERSION_OBJ,
   CLOCK_OBJ,
+  COIN_DECIMALS,
   COINS_TYPE_LIST,
   FRAMEWORK_PACKAGE_ID,
   LIQUIDATION_PACKAGE_ID,
@@ -212,13 +213,14 @@ export class VirtueClient {
     });
     if (tokensRes.data) {
       const vusdBalances = tokensRes.data.map((token) => {
-        const tokenFiels = getObjectFields(token);
-        if (tokenFiels) {
-          return tokenFiels.amount;
+        const tokenFields = getObjectFields(token);
+        if (tokenFields) {
+          return formatBigInt(tokenFields.amount, COIN_DECIMALS.VUSD);
         } else {
           return 0;
         }
       });
+
       return {
         vusdBalance: vusdBalances.reduce((x, y) => x + y, 0),
         collBalances: {

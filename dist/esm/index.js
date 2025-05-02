@@ -442,9 +442,9 @@ var VirtueClient = class {
     });
     if (tokensRes.data) {
       const vusdBalances = tokensRes.data.map((token) => {
-        const tokenFiels = getObjectFields(token);
-        if (tokenFiels) {
-          return tokenFiels.amount;
+        const tokenFields = getObjectFields(token);
+        if (tokenFields) {
+          return formatBigInt(tokenFields.amount, COIN_DECIMALS.VUSD);
         } else {
           return 0;
         }
