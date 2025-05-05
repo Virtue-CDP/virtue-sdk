@@ -304,9 +304,10 @@ var parsePositionObject = (resp) => {
   if (!collateral) {
     return;
   }
+  console.log(resp.fields.coll_amount, resp.fields.interest_buffer);
   return {
     collateral,
-    collAmount: (+resp.fields.coll_amount + resp.fields.interest_buffer).toString(),
+    collAmount: (BigInt(resp.fields.coll_amount) + BigInt(resp.fields.interest_buffer)).toString(),
     debtAmount: resp.fields.debt_amount
   };
 };
