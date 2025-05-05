@@ -51,14 +51,12 @@ export const parsePositionObject = (
     return;
   }
 
-  console.log(resp.fields.coll_amount, resp.fields.interest_buffer);
-
   return {
     collateral: collateral as COLLATERAL_COIN,
-    collAmount: (
-      BigInt(resp.fields.coll_amount) + BigInt(resp.fields.interest_buffer)
+    collAmount: resp.fields.coll_amount,
+    debtAmount: (
+      BigInt(resp.fields.debt_amount) + BigInt(resp.fields.interest_buffer)
     ).toString(),
-    debtAmount: resp.fields.debt_amount,
   };
 };
 
