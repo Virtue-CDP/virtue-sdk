@@ -65,8 +65,6 @@ type StabilityPoolInfo = {
 };
 
 declare class VirtueClient {
-    network: string;
-    sender: string;
     /**
      * @description a TS wrapper over Virtue CDP client.
      * @param network connection to fullnode: 'mainnet' | 'testnet' | 'devnet' | 'localnet' | string
@@ -77,7 +75,11 @@ declare class VirtueClient {
     private pythConnection;
     private pythClient;
     private transaction;
-    constructor(network?: string, sender?: string);
+    sender: string;
+    constructor(inputs: {
+        rpcUrl?: string;
+        sender?: string;
+    });
     /**
      * @description Get this.iotaClient
      */

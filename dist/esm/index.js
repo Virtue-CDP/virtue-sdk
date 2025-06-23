@@ -288,14 +288,10 @@ import {
 import { bcs } from "@iota/iota-sdk/bcs";
 var DUMMY_ADDRESS = "0xcafe";
 var VirtueClient = class {
-  constructor(network = "mainnet", sender = DUMMY_ADDRESS) {
-    this.network = network;
-    this.sender = sender;
-    if (network == "mainnet" || network == "testnet" || network == "devnet" || network == "localnet") {
-      this.rpcEndpoint = getFullnodeUrl(network);
-    } else {
-      this.rpcEndpoint = network;
-    }
+  constructor(inputs) {
+    const { rpcUrl, sender } = inputs;
+    this.rpcEndpoint = rpcUrl ?? getFullnodeUrl("mainnet");
+    this.sender = sender ?? DUMMY_ADDRESS;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
       "https://hermes.pyth.network"

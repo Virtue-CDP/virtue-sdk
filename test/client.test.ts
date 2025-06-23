@@ -5,7 +5,7 @@ describe("Interacting with VirtueClient", () => {
   // Instantiate Client
   const walletAddress =
     "0x659c0adb3242852bbf7684e8c568c4a5eff34bdc6bf5227fdcaccae930da2346";
-  const client = new VirtueClient("mainnet", walletAddress);
+  const client = new VirtueClient({ sender: walletAddress });
 
   it("test getAllVaults() function", async () => {
     const vaults = await client.getAllVaults();

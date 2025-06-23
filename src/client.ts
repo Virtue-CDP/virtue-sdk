@@ -57,22 +57,12 @@ export class VirtueClient {
   private pythConnection: IotaPriceServiceConnection;
   private pythClient: IotaPythClient;
   private transaction: Transaction;
+  public sender: string;
 
-  constructor(
-    public network: string = "mainnet",
-    public sender: string = DUMMY_ADDRESS,
-  ) {
-    if (
-      network == "mainnet" ||
-      network == "testnet" ||
-      network == "devnet" ||
-      network == "localnet"
-    ) {
-      this.rpcEndpoint = getFullnodeUrl(network);
-    } else {
-      this.rpcEndpoint = network as string;
-    }
-
+  constructor(inputs: { rpcUrl?: string; sender?: string }) {
+    const { rpcUrl, sender } = inputs;
+    this.rpcEndpoint = rpcUrl ?? getFullnodeUrl("mainnet");
+    this.sender = sender ?? DUMMY_ADDRESS;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
       "https://hermes.pyth.network",

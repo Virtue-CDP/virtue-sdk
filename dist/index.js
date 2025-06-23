@@ -288,14 +288,10 @@ var _pythiotajs = require('@pythnetwork/pyth-iota-js');
 var _bcs = require('@iota/iota-sdk/bcs');
 var DUMMY_ADDRESS = "0xcafe";
 var VirtueClient = class {
-  constructor(network = "mainnet", sender = DUMMY_ADDRESS) {
-    this.network = network;
-    this.sender = sender;
-    if (network == "mainnet" || network == "testnet" || network == "devnet" || network == "localnet") {
-      this.rpcEndpoint = _client.getFullnodeUrl.call(void 0, network);
-    } else {
-      this.rpcEndpoint = network;
-    }
+  constructor(inputs) {
+    const { rpcUrl, sender } = inputs;
+    this.rpcEndpoint = _nullishCoalesce(rpcUrl, () => ( _client.getFullnodeUrl.call(void 0, "mainnet")));
+    this.sender = _nullishCoalesce(sender, () => ( DUMMY_ADDRESS));
     this.iotaClient = new (0, _client.IotaClient)({ url: this.rpcEndpoint });
     this.pythConnection = new (0, _pythiotajs.IotaPriceServiceConnection)(
       "https://hermes.pyth.network"
