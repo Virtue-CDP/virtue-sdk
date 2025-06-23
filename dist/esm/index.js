@@ -70,6 +70,17 @@ var PYTH_RULE_CONFIG_OBJ = {
   initialSharedVersion: 22329882,
   mutable: false
 };
+var CERT_RULE_PACKAGE_ID = "0x01edb9afe0663b8762d2e0a18923df8bee98d28f3a60ac56ff67a27bbf53a7ac";
+var CERT_NATIVE_POOL_OBJ = {
+  objectId: "0x02d641d7b021b1cd7a2c361ac35b415ae8263be0641f9475ec32af4b9d8a8056",
+  initialSharedVersion: 19,
+  mutable: false
+};
+var CERT_METADATA_OBJ = {
+  objectId: "0x8c25ec843c12fbfddc7e25d66869f8639e20021758cac1a3db0f6de3c9fda2ed",
+  initialSharedVersion: 19,
+  mutable: false
+};
 
 // src/utils/format.ts
 import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
@@ -516,6 +527,26 @@ var VirtueClient = class {
           collector
         ]
       });
+    } else if (collateralSymbol === "stIOTA") {
+      const [collector2] = this.newPriceCollector("stIOTA");
+      const [iotaPriceResult] = await this.aggregatePrice("IOTA");
+      this.transaction.moveCall({
+        target: `${CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
+        arguments: [
+          collector2,
+          iotaPriceResult,
+          this.transaction.sharedObjectRef(CERT_NATIVE_POOL_OBJ),
+          this.transaction.sharedObjectRef(CERT_METADATA_OBJ)
+        ]
+      });
+      return this.transaction.moveCall({
+        target: `${ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+        typeArguments: [COINS_TYPE_LIST.stIOTA],
+        arguments: [
+          this.transaction.sharedObjectRef(vaultInfo.priceAggregater),
+          collector2
+        ]
+      });
     } else {
       return this.aggregatePrice("IOTA");
     }
@@ -693,6 +724,9 @@ var VirtueClient = class {
 };
 export {
   CDP_PACKAGE_ID,
+  CERT_METADATA_OBJ,
+  CERT_NATIVE_POOL_OBJ,
+  CERT_RULE_PACKAGE_ID,
   CLOCK_OBJ,
   COINS_TYPE_LIST,
   COIN_DECIMALS,

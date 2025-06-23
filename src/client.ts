@@ -7,6 +7,9 @@ import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
 
 import {
   CDP_PACKAGE_ID,
+  CERT_METADATA_OBJ,
+  CERT_NATIVE_POOL_OBJ,
+  CERT_RULE_PACKAGE_ID,
   CLOCK_OBJ,
   COINS_TYPE_LIST,
   FRAMEWORK_PACKAGE_ID,
@@ -319,8 +322,27 @@ export class VirtueClient {
           collector,
         ],
       });
+    } else if (collateralSymbol === "stIOTA") {
+      const [collector] = this.newPriceCollector("stIOTA");
+      const [iotaPriceResult] = await this.aggregatePrice("IOTA");
+      this.transaction.moveCall({
+        target: `${CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
+        arguments: [
+          collector,
+          iotaPriceResult,
+          this.transaction.sharedObjectRef(CERT_NATIVE_POOL_OBJ),
+          this.transaction.sharedObjectRef(CERT_METADATA_OBJ),
+        ],
+      });
+      return this.transaction.moveCall({
+        target: `${ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+        typeArguments: [COINS_TYPE_LIST.stIOTA],
+        arguments: [
+          this.transaction.sharedObjectRef(vaultInfo.priceAggregater),
+          collector,
+        ],
+      });
     } else {
-      // TODO: integrate stIOTA
       return this.aggregatePrice("IOTA");
     }
   }

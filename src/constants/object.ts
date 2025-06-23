@@ -28,14 +28,14 @@ export const CDP_PACKAGE_ID =
 
 /// Shared Objects
 
-export const CLOCK_OBJ = {
+export const CLOCK_OBJ: SharedObjectRef = {
   objectId:
     "0x0000000000000000000000000000000000000000000000000000000000000006",
   mutable: false,
   initialSharedVersion: 1,
 };
 
-export const TREASURY_OBJ = {
+export const TREASURY_OBJ: SharedObjectRef = {
   objectId:
     "0x81f525f4fa5b2d3cf58677d3e39aabc4b0a1ca25cbba605033cfe417e47b0a16",
   mutable: true,
@@ -100,6 +100,22 @@ export const PYTH_RULE_CONFIG_OBJ: SharedObjectRef = {
   initialSharedVersion: 22329882,
   mutable: false,
 };
+
+export const CERT_RULE_PACKAGE_ID =
+  "0x01edb9afe0663b8762d2e0a18923df8bee98d28f3a60ac56ff67a27bbf53a7ac";
+export const CERT_NATIVE_POOL_OBJ: SharedObjectRef = {
+  objectId:
+    "0x02d641d7b021b1cd7a2c361ac35b415ae8263be0641f9475ec32af4b9d8a8056",
+  initialSharedVersion: 19,
+  mutable: false,
+};
+export const CERT_METADATA_OBJ: SharedObjectRef = {
+  objectId:
+    "0x8c25ec843c12fbfddc7e25d66869f8639e20021758cac1a3db0f6de3c9fda2ed",
+  initialSharedVersion: 19,
+  mutable: false,
+};
+
 // export const STABILITY_POOL_OBJ: SharedObjectRef = {
 //   objectId:
 //     "0x963b3d757dcd5ad14773a503eb481143b64d3686aebdf6a90443d908582188e0",

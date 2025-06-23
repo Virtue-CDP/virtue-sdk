@@ -70,6 +70,17 @@ var PYTH_RULE_CONFIG_OBJ = {
   initialSharedVersion: 22329882,
   mutable: false
 };
+var CERT_RULE_PACKAGE_ID = "0x01edb9afe0663b8762d2e0a18923df8bee98d28f3a60ac56ff67a27bbf53a7ac";
+var CERT_NATIVE_POOL_OBJ = {
+  objectId: "0x02d641d7b021b1cd7a2c361ac35b415ae8263be0641f9475ec32af4b9d8a8056",
+  initialSharedVersion: 19,
+  mutable: false
+};
+var CERT_METADATA_OBJ = {
+  objectId: "0x8c25ec843c12fbfddc7e25d66869f8639e20021758cac1a3db0f6de3c9fda2ed",
+  initialSharedVersion: 19,
+  mutable: false
+};
 
 // src/utils/format.ts
 var _utils = require('@iota/iota-sdk/utils');
@@ -516,6 +527,26 @@ var VirtueClient = class {
           collector
         ]
       });
+    } else if (collateralSymbol === "stIOTA") {
+      const [collector2] = this.newPriceCollector("stIOTA");
+      const [iotaPriceResult] = await this.aggregatePrice("IOTA");
+      this.transaction.moveCall({
+        target: `${CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
+        arguments: [
+          collector2,
+          iotaPriceResult,
+          this.transaction.sharedObjectRef(CERT_NATIVE_POOL_OBJ),
+          this.transaction.sharedObjectRef(CERT_METADATA_OBJ)
+        ]
+      });
+      return this.transaction.moveCall({
+        target: `${ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+        typeArguments: [COINS_TYPE_LIST.stIOTA],
+        arguments: [
+          this.transaction.sharedObjectRef(vaultInfo.priceAggregater),
+          collector2
+        ]
+      });
     } else {
       return this.aggregatePrice("IOTA");
     }
@@ -728,5 +759,8 @@ var VirtueClient = class {
 
 
 
-exports.CDP_PACKAGE_ID = CDP_PACKAGE_ID; exports.CLOCK_OBJ = CLOCK_OBJ; exports.COINS_TYPE_LIST = COINS_TYPE_LIST; exports.COIN_DECIMALS = COIN_DECIMALS; exports.FRAMEWORK_PACKAGE_ID = FRAMEWORK_PACKAGE_ID; exports.ORACLE_PACKAGE_ID = ORACLE_PACKAGE_ID; exports.ORIGINAL_CDP_PACKAGE_ID = ORIGINAL_CDP_PACKAGE_ID; exports.ORIGINAL_FRAMEWORK_PACKAGE_ID = ORIGINAL_FRAMEWORK_PACKAGE_ID; exports.ORIGINAL_ORACLE_PACKAGE_ID = ORIGINAL_ORACLE_PACKAGE_ID; exports.ORIGINAL_VUSD_PACKAGE_ID = ORIGINAL_VUSD_PACKAGE_ID; exports.ObjectContentFields = ObjectContentFields; exports.PYTH_RULE_CONFIG_OBJ = PYTH_RULE_CONFIG_OBJ; exports.PYTH_RULE_PACKAGE_ID = PYTH_RULE_PACKAGE_ID; exports.PYTH_STATE_ID = PYTH_STATE_ID; exports.TREASURY_OBJ = TREASURY_OBJ; exports.U64FromBytes = U64FromBytes; exports.VAULT_MAP = VAULT_MAP; exports.VUSD_PACKAGE_ID = VUSD_PACKAGE_ID; exports.VirtueClient = VirtueClient; exports.WORMHOLE_STATE_ID = WORMHOLE_STATE_ID; exports.coinFromBalance = coinFromBalance; exports.coinIntoBalance = coinIntoBalance; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getInputCoins = getInputCoins; exports.getIotaObjectData = getIotaObjectData; exports.getMainCoin = getMainCoin; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.getPriceResultType = getPriceResultType; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
+
+
+
+exports.CDP_PACKAGE_ID = CDP_PACKAGE_ID; exports.CERT_METADATA_OBJ = CERT_METADATA_OBJ; exports.CERT_NATIVE_POOL_OBJ = CERT_NATIVE_POOL_OBJ; exports.CERT_RULE_PACKAGE_ID = CERT_RULE_PACKAGE_ID; exports.CLOCK_OBJ = CLOCK_OBJ; exports.COINS_TYPE_LIST = COINS_TYPE_LIST; exports.COIN_DECIMALS = COIN_DECIMALS; exports.FRAMEWORK_PACKAGE_ID = FRAMEWORK_PACKAGE_ID; exports.ORACLE_PACKAGE_ID = ORACLE_PACKAGE_ID; exports.ORIGINAL_CDP_PACKAGE_ID = ORIGINAL_CDP_PACKAGE_ID; exports.ORIGINAL_FRAMEWORK_PACKAGE_ID = ORIGINAL_FRAMEWORK_PACKAGE_ID; exports.ORIGINAL_ORACLE_PACKAGE_ID = ORIGINAL_ORACLE_PACKAGE_ID; exports.ORIGINAL_VUSD_PACKAGE_ID = ORIGINAL_VUSD_PACKAGE_ID; exports.ObjectContentFields = ObjectContentFields; exports.PYTH_RULE_CONFIG_OBJ = PYTH_RULE_CONFIG_OBJ; exports.PYTH_RULE_PACKAGE_ID = PYTH_RULE_PACKAGE_ID; exports.PYTH_STATE_ID = PYTH_STATE_ID; exports.TREASURY_OBJ = TREASURY_OBJ; exports.U64FromBytes = U64FromBytes; exports.VAULT_MAP = VAULT_MAP; exports.VUSD_PACKAGE_ID = VUSD_PACKAGE_ID; exports.VirtueClient = VirtueClient; exports.WORMHOLE_STATE_ID = WORMHOLE_STATE_ID; exports.coinFromBalance = coinFromBalance; exports.coinIntoBalance = coinIntoBalance; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getInputCoins = getInputCoins; exports.getIotaObjectData = getIotaObjectData; exports.getMainCoin = getMainCoin; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.getPriceResultType = getPriceResultType; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
 //# sourceMappingURL=index.js.map
