@@ -42,7 +42,7 @@ import {
   IotaPriceServiceConnection,
   IotaPythClient,
 } from "@pythnetwork/pyth-iota-js";
-import { bcs } from "@iota/iota-sdk/dist/cjs/bcs";
+import { bcs } from "@iota/iota-sdk/bcs";
 
 const DUMMY_ADDRESS = "0xcafe";
 

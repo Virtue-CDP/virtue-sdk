@@ -285,7 +285,7 @@ import {
   IotaPriceServiceConnection,
   IotaPythClient
 } from "@pythnetwork/pyth-iota-js";
-import { bcs } from "@iota/iota-sdk/dist/cjs/bcs";
+import { bcs } from "@iota/iota-sdk/bcs";
 var DUMMY_ADDRESS = "0xcafe";
 var VirtueClient = class {
   constructor(network = "mainnet", sender = DUMMY_ADDRESS) {

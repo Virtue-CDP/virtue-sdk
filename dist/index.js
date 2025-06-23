@@ -285,7 +285,7 @@ var parseVaultObject = (coinSymbol, fields) => {
 
 
 var _pythiotajs = require('@pythnetwork/pyth-iota-js');
-var _bcs = require('@iota/iota-sdk/dist/cjs/bcs');
+var _bcs = require('@iota/iota-sdk/bcs');
 var DUMMY_ADDRESS = "0xcafe";
 var VirtueClient = class {
   constructor(network = "mainnet", sender = DUMMY_ADDRESS) {

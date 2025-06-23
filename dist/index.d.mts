@@ -3,7 +3,6 @@ import { IotaClient, IotaObjectData, IotaParsedData, IotaObjectResponse, IotaMov
 import { IotaPriceServiceConnection, IotaPythClient } from '@pythnetwork/pyth-iota-js';
 import * as superstruct from 'superstruct';
 import { Infer } from 'superstruct';
-import { SharedObjectRef } from '@iota/iota-sdk/dist/cjs/bcs/types';
 
 type COIN = "IOTA" | "stIOTA" | "VUSD";
 type COLLATERAL_COIN = "IOTA" | "stIOTA";
@@ -216,6 +215,11 @@ declare const TREASURY_OBJ: {
     mutable: boolean;
     initialSharedVersion: number;
 };
+type SharedObjectRef = {
+    objectId: string;
+    mutable: boolean;
+    initialSharedVersion: number;
+};
 type VaultObjectInfo = {
     priceAggregater: SharedObjectRef;
     vault: SharedObjectRef;
@@ -227,4 +231,4 @@ declare const WORMHOLE_STATE_ID = "0xd43b448afc9dd01deb18273ec39d8f27ddd4dd46b09
 declare const PYTH_RULE_PACKAGE_ID = "0xed5a8dac2ca41ae9bdc1c7f778b0949d3e26c18c51ed284c4cfa4030d0bb64c2";
 declare const PYTH_RULE_CONFIG_OBJ: SharedObjectRef;
 
-export { CDP_PACKAGE_ID, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };

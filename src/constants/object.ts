@@ -1,5 +1,4 @@
 import { COLLATERAL_COIN } from "@/types";
-import { SharedObjectRef } from "@iota/iota-sdk/dist/cjs/bcs/types";
 
 /// Original Package IDs
 
@@ -41,6 +40,12 @@ export const TREASURY_OBJ = {
     "0x81f525f4fa5b2d3cf58677d3e39aabc4b0a1ca25cbba605033cfe417e47b0a16",
   mutable: true,
   initialSharedVersion: 22329876,
+};
+
+export type SharedObjectRef = {
+  objectId: string;
+  mutable: boolean;
+  initialSharedVersion: number;
 };
 
 export type VaultObjectInfo = {
