@@ -7,19 +7,16 @@ import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
 
 import {
   CDP_PACKAGE_ID,
-  CDP_VERSION_OBJ,
   CLOCK_OBJ,
-  COIN_DECIMALS,
   COINS_TYPE_LIST,
   FRAMEWORK_PACKAGE_ID,
-  LIQUIDATION_PACKAGE_ID,
   ORACLE_PACKAGE_ID,
-  ORIGINAL_LIQUIDATION_PACKAGE_ID,
-  STABILITY_POOL_OBJ,
-  TESTNET_PRICE_FEED_OBJ,
-  TESTNET_PRICE_PACKAGE_ID,
+  PYTH_RULE_CONFIG_OBJ,
+  PYTH_RULE_PACKAGE_ID,
+  PYTH_STATE_ID,
   TREASURY_OBJ,
   VAULT_MAP,
+  WORMHOLE_STATE_ID,
 } from "@/constants";
 import {
   VaultInfo,
@@ -27,22 +24,24 @@ import {
   COLLATERAL_COIN,
   PositionInfo,
   VaultInfoList,
-  PositionResponse,
-  PriceMapResponse,
-  COIN,
-  StabilityPoolBalances,
-  StabilityPoolResponse,
-  StabilityPoolInfo,
+  // PositionResponse,
+  // StabilityPoolBalances,
+  // StabilityPoolResponse,
+  // StabilityPoolInfo,
 } from "@/types";
 import {
-  formatBigInt,
-  getCoinSymbol,
+  // formatBigInt,e
   getObjectFields,
   getPriceResultType,
-  parsePositionObject,
-  parseStabilityPoolObject,
+  // parsePositionObject,
+  // parseStabilityPoolObject,
   parseVaultObject,
 } from "@/utils";
+import {
+  IotaPriceServiceConnection,
+  IotaPythClient,
+} from "@pythnetwork/pyth-iota-js";
+import { bcs } from "@iota/iota-sdk/dist/cjs/bcs";
 
 const DUMMY_ADDRESS = "0x0";
 
@@ -54,6 +53,8 @@ export class VirtueClient {
    */
   private rpcEndpoint: string;
   private client: IotaClient;
+  private pythConnection: IotaPriceServiceConnection;
+  private pythClient: IotaPythClient;
 
   constructor(
     public network: string = "mainnet",
@@ -71,6 +72,15 @@ export class VirtueClient {
     }
 
     this.client = new IotaClient({ url: this.rpcEndpoint });
+    this.pythConnection = new IotaPriceServiceConnection(
+      "https://hermes.pyth.network",
+    );
+    /* eslint-disable  @typescript-eslint/no-explicit-any */
+    this.pythClient = new IotaPythClient(
+      this.client as any,
+      PYTH_STATE_ID,
+      WORMHOLE_STATE_ID,
+    );
   }
 
   getClient() {
@@ -111,36 +121,6 @@ export class VirtueClient {
   }
 
   /**
-   * @description Get prices from oracle
-   */
-  async getPrices() {
-    const res = await this.client.getObject({
-      id: TESTNET_PRICE_FEED_OBJ.objectId,
-      options: {
-        showContent: true,
-      },
-    });
-    const mapObj = getObjectFields(res) as PriceMapResponse;
-    const fields = mapObj.price_map.fields.contents;
-
-    const prices: Record<COIN, number> = {
-      IOTA: 0,
-      stIOTA: 0,
-      VUSD: 1,
-    };
-
-    for (const field of fields) {
-      const coinType = `0x${field.fields.key.fields.name}`;
-      const symbol = getCoinSymbol(coinType);
-      if (!symbol) continue;
-
-      prices[symbol] = formatBigInt(field.fields.value.fields.value);
-    }
-
-    return prices;
-  }
-
-  /**
    * @description Get Vault<token> object
    */
   async getVault(token: COLLATERAL_COIN): Promise<VaultInfo> {
@@ -156,102 +136,100 @@ export class VirtueClient {
   }
 
   async getPositionsByDebtor(debtor: string): Promise<PositionInfo[]> {
-    const vaults = await this.getAllVaults();
-    const positions: PositionInfo[] = [];
-    for (const vault of Object.values(vaults)) {
-      const tableId = vault.bottleTableId;
-      const res = await this.client.getDynamicFieldObject({
-        parentId: tableId,
-        name: {
-          type: "address",
-          value: debtor,
-        },
+    const tx = new Transaction();
+    const clockObj = tx.sharedObjectRef(CLOCK_OBJ);
+    const tokenList = Object.keys(VAULT_MAP) as COLLATERAL_COIN[];
+    tokenList.map((token) => {
+      tx.moveCall({
+        target: `${CDP_PACKAGE_ID}::vault::try_get_position_data`,
+        typeArguments: [COINS_TYPE_LIST[token]],
+        arguments: [
+          tx.sharedObjectRef(VAULT_MAP[token].vault),
+          tx.pure.address(debtor),
+          clockObj,
+        ],
       });
-      const obj = getObjectFields(res);
-      if (!obj) continue;
+    });
 
-      const response = obj.value.fields.value as PositionResponse;
-      const position = parsePositionObject(response);
-      if (position) {
-        positions.push(position);
+    const res = await this.getClient().devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: debtor,
+    });
+    if (!res.results) return [];
+
+    return res.results.map((value, idx) => {
+      const collateral = tokenList[idx];
+      if (value.returnValues) {
+        const [collReturn, debtReturn] = value.returnValues;
+        return {
+          collateral,
+          collAmount: collReturn
+            ? bcs.u64().parse(Uint8Array.from(collReturn[0]))
+            : "0",
+          debtAmount: debtReturn
+            ? bcs.u64().parse(Uint8Array.from(debtReturn[0]))
+            : "0",
+        };
+      } else {
+        return {
+          collateral: tokenList[idx],
+          collAmount: "0",
+          debtAmount: "0",
+        };
       }
-    }
-
-    return positions;
-  }
-
-  async getPosition(
-    debtor: string,
-    collateral: COLLATERAL_COIN,
-  ): Promise<PositionInfo | undefined> {
-    const vaultInfo = await this.getVault(collateral);
-    const tableId = vaultInfo.bottleTableId;
-    const res = await this.client.getDynamicFieldObject({
-      parentId: tableId,
-      name: {
-        type: "address",
-        value: debtor,
-      },
     });
-    const obj = getObjectFields(res);
-    if (!obj) return;
-
-    const response = getObjectFields(
-      obj.value.fields.value,
-    ) as PositionResponse;
-    return parsePositionObject(response);
   }
 
-  async getStabilityPool(): Promise<StabilityPoolInfo> {
-    const res = await this.client.getObject({
-      id: STABILITY_POOL_OBJ.objectId,
-      options: {
-        showContent: true,
-      },
-    });
-    const fields = getObjectFields(res) as StabilityPoolResponse;
-    return parseStabilityPoolObject(fields);
-  }
+  // async getStabilityPool(): Promise<StabilityPoolInfo> {
+  //   const res = await this.client.getObject({
+  //     id: STABILITY_POOL_OBJ.objectId,
+  //     options: {
+  //       showContent: true,
+  //     },
+  //   });
+  //   const fields = getObjectFields(res) as StabilityPoolResponse;
+  //   return parseStabilityPoolObject(fields);
+  // }
 
-  async getStabilityPoolBalances(
-    account: string,
-  ): Promise<StabilityPoolBalances> {
-    const tokensRes = await this.client.getOwnedObjects({
-      owner: account,
-      filter: {
-        StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`,
-      },
-      options: {
-        showContent: true,
-      },
-    });
-    if (tokensRes.data) {
-      const vusdBalances = tokensRes.data.map((token) => {
-        const tokenFields = getObjectFields(token);
-        if (tokenFields) {
-          return formatBigInt(tokenFields.amount, COIN_DECIMALS.VUSD);
-        } else {
-          return 0;
-        }
-      });
+  // async getStabilityPoolBalances(
+  //   account: string,
+  // ): Promise<StabilityPoolBalances> {
+  //   const tokensRes = await this.client.getOwnedObjects({
+  //     owner: account,
+  //     filter: {
+  //       StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`,
+  //     },
+  //     options: {
+  //       showContent: true,
+  //     },
+  //   });
+  //   if (tokensRes.data) {
+  //     const vusdBalances = tokensRes.data.map((token) => {
+  //       const tokenFields = getObjectFields(token);
+  //       if (tokenFields) {
+  //         return formatBigInt(tokenFields.amount, COIN_DECIMALS.VUSD);
+  //       } else {
+  //         return 0;
+  //       }
+  //     });
 
-      return {
-        vusdBalance: vusdBalances.reduce((x, y) => x + y, 0),
-        collBalances: {
-          IOTA: 0,
-          stIOTA: 0,
-        },
-      };
-    } else {
-      return {
-        vusdBalance: 0,
-        collBalances: {
-          IOTA: 0,
-          stIOTA: 0,
-        },
-      };
-    }
-  }
+  //     return {
+  //       vusdBalance: vusdBalances.reduce((x, y) => x + y, 0),
+  //       collBalances: {
+  //         IOTA: 0,
+  //         stIOTA: 0,
+  //       },
+  //     };
+  //   } else {
+  //     return {
+  //       vusdBalance: 0,
+  //       collBalances: {
+  //         IOTA: 0,
+  //         stIOTA: 0,
+  //       },
+  //     };
+  //   }
+  // }
 
   /**
    * @description Create a price collector
@@ -259,11 +237,11 @@ export class VirtueClient {
    */
   newPriceCollector(
     tx: Transaction,
-    coinSymbol: COLLATERAL_COIN,
+    collateralSymbol: COLLATERAL_COIN,
   ): TransactionResult {
     return tx.moveCall({
       target: `${ORACLE_PACKAGE_ID}::collector::new`,
-      typeArguments: [COINS_TYPE_LIST[coinSymbol]],
+      typeArguments: [COINS_TYPE_LIST[collateralSymbol]],
     });
   }
 
@@ -271,28 +249,41 @@ export class VirtueClient {
    * @description Get a price result
    * @param collateral coin symbol, e.g "IOTA"
    */
-  aggregatePrice(
+  async aggregatePrice(
     tx: Transaction,
-    coinSymbol: COLLATERAL_COIN,
-  ): TransactionResult {
-    const [collector] = this.newPriceCollector(tx, coinSymbol);
-    const coinType = COINS_TYPE_LIST[coinSymbol];
-    // TODO: testnet only
-    tx.moveCall({
-      target: `${TESTNET_PRICE_PACKAGE_ID}::testnet_price::self_price`,
-      typeArguments: [coinType],
-      arguments: [tx.sharedObjectRef(TESTNET_PRICE_FEED_OBJ), collector],
-    });
-
-    // aggregate
-    const aggregater = tx.sharedObjectRef(
-      VAULT_MAP[coinSymbol].priceAggregater,
-    );
-    return tx.moveCall({
-      target: `${ORACLE_PACKAGE_ID}::aggregater::aggregate`,
-      typeArguments: [coinType],
-      arguments: [aggregater, collector],
-    });
+    collateralSymbol: COLLATERAL_COIN,
+  ): Promise<TransactionResult> {
+    const [collector] = this.newPriceCollector(tx, collateralSymbol);
+    const coinType = COINS_TYPE_LIST[collateralSymbol];
+    const vaultInfo = VAULT_MAP[collateralSymbol];
+    if (vaultInfo.pythPriceId) {
+      const updateData = await this.pythConnection.getPriceFeedsUpdateData([
+        vaultInfo.pythPriceId,
+      ]);
+      const [priceInfoObjId] = await this.pythClient.updatePriceFeeds(
+        tx as any,
+        updateData,
+        [vaultInfo.pythPriceId],
+      );
+      tx.moveCall({
+        target: `${PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
+        typeArguments: [coinType],
+        arguments: [
+          collector,
+          tx.sharedObjectRef(PYTH_RULE_CONFIG_OBJ),
+          tx.sharedObjectRef(CLOCK_OBJ),
+          tx.object(PYTH_STATE_ID),
+          tx.object(priceInfoObjId),
+        ],
+      });
+      return tx.moveCall({
+        target: `${ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+        typeArguments: [coinType],
+        arguments: [tx.sharedObjectRef(vaultInfo.priceAggregater), collector],
+      });
+    } else {
+      return this.aggregatePrice(tx, "IOTA");
+    }
   }
 
   /**
@@ -305,16 +296,27 @@ export class VirtueClient {
    * @param the amount to withdraw
    * @returns ManageRequest
    */
-  requestManagePosition(
+  debtorRequest(
     tx: Transaction,
-    coinSymbol: COLLATERAL_COIN,
-    depositCoin: TransactionArgument,
-    borrowAmount: string,
-    repaymentCoin: TransactionArgument,
-    withdrawAmount: string,
-    accountObj?: string | TransactionArgument,
+    inputs: {
+      collateralSymbol: COLLATERAL_COIN;
+      depositCoin: TransactionArgument;
+      borrowAmount: string;
+      repaymentCoin: TransactionArgument;
+      withdrawAmount: string;
+      accountObj?: string | TransactionArgument;
+    },
   ) {
-    const coinType = COINS_TYPE_LIST[coinSymbol];
+    const {
+      collateralSymbol,
+      depositCoin,
+      borrowAmount,
+      repaymentCoin,
+      withdrawAmount,
+      accountObj,
+    } = inputs;
+    const coinType = COINS_TYPE_LIST[collateralSymbol];
+    const vaultId = VAULT_MAP[collateralSymbol].vault.objectId;
     const [accountReq] = accountObj
       ? tx.moveCall({
           target: `${FRAMEWORK_PACKAGE_ID}::account::request_with_account`,
@@ -326,11 +328,12 @@ export class VirtueClient {
           target: `${FRAMEWORK_PACKAGE_ID}::account::request`,
         });
     return tx.moveCall({
-      target: `${CDP_PACKAGE_ID}::manage::request`,
+      target: `${CDP_PACKAGE_ID}::request::debtor_request`,
       typeArguments: [coinType],
       arguments: [
-        tx.sharedObjectRef(CDP_VERSION_OBJ),
         accountReq,
+        tx.sharedObjectRef(TREASURY_OBJ),
+        tx.pure.id(vaultId),
         depositCoin,
         tx.pure.u64(borrowAmount),
         repaymentCoin,
@@ -343,72 +346,72 @@ export class VirtueClient {
    * @description Manage Position
    * @param tx
    * @param collateral coin symbol , e.g "IOTA"
-   * @param manager request, see this.requestManagePosition
+   * @param manager request, ex: see this.debtorRequest
    * @param price result, see this.getPriceResult
    * @param the position place to insert
    * @returns [Coin<T>, COIN<VUSD>]
    */
-  managePosition(
+  updatePosition(
     tx: Transaction,
-    coinSymbol: COLLATERAL_COIN,
-    manageRequest: TransactionArgument,
-    priceResult?: TransactionArgument,
-    insertionPlace?: string,
+    inputs: {
+      collateralSymbol: COLLATERAL_COIN;
+      manageRequest: TransactionArgument;
+      priceResult?: TransactionArgument;
+    },
   ): TransactionResult {
-    const vault = VAULT_MAP[coinSymbol].vault;
+    const { collateralSymbol, manageRequest, priceResult } = inputs;
+    const vault = VAULT_MAP[collateralSymbol].vault;
     const priceResultOpt = priceResult
       ? tx.moveCall({
           target: `0x1::option::some`,
-          typeArguments: [getPriceResultType(coinSymbol)],
+          typeArguments: [getPriceResultType(collateralSymbol)],
           arguments: [priceResult],
         })
       : tx.moveCall({
           target: `0x1::option::none`,
-          typeArguments: [getPriceResultType(coinSymbol)],
+          typeArguments: [getPriceResultType(collateralSymbol)],
         });
     return tx.moveCall({
-      target: `${CDP_PACKAGE_ID}::vault::manage_position`,
-      typeArguments: [COINS_TYPE_LIST[coinSymbol]],
+      target: `${CDP_PACKAGE_ID}::vault::update_position`,
+      typeArguments: [COINS_TYPE_LIST[collateralSymbol]],
       arguments: [
         tx.sharedObjectRef(vault),
-        tx.sharedObjectRef(CDP_VERSION_OBJ),
         tx.sharedObjectRef(TREASURY_OBJ),
         tx.sharedObjectRef(CLOCK_OBJ),
         priceResultOpt,
         manageRequest,
-        tx.pure.option("address", insertionPlace),
       ],
     });
   }
 
-  depositStabilityPool(
-    tx: Transaction,
-    vusdCoin: TransactionArgument,
-  ): TransactionResult {
-    return tx.moveCall({
-      target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::deposit`,
-      arguments: [tx.sharedObjectRef(STABILITY_POOL_OBJ), vusdCoin],
-    });
-  }
+  // depositStabilityPool(
+  //   tx: Transaction,
+  //   vusdCoin: TransactionArgument,
+  // ): TransactionResult {
+  //   return tx.moveCall({
+  //     target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::deposit`,
+  //     arguments: [tx.sharedObjectRef(STABILITY_POOL_OBJ), vusdCoin],
+  //   });
+  // }
 
-  withdrawStabilityPool(
-    tx: Transaction,
-    tokens: TransactionArgument[],
-    amount: string,
-  ): TransactionResult {
-    const stabilityPool = tx.sharedObjectRef(STABILITY_POOL_OBJ);
-    const [mainCoin, ...otherCoins] = tokens.map((token) => {
-      const [vusdCoin] = tx.moveCall({
-        target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::withdraw`,
-        arguments: [stabilityPool, token],
-      });
-      return vusdCoin;
-    });
-    if (otherCoins.length > 0) {
-      tx.mergeCoins(mainCoin, otherCoins);
-    }
-    const [outCoin] = tx.splitCoins(mainCoin, [amount]);
-    const [token] = this.depositStabilityPool(tx, mainCoin);
-    return [outCoin, token] as TransactionResult;
-  }
+  // withdrawStabilityPool(
+  //   tx: Transaction,
+  //   tokens: TransactionArgument[],
+  //   amount: string,
+  // ): TransactionResult {
+  //   const stabilityPool = tx.sharedObjectRef(STABILITY_POOL_OBJ);
+  //   const [mainCoin, ...otherCoins] = tokens.map((token) => {
+  //     const [vusdCoin] = tx.moveCall({
+  //       target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::withdraw`,
+  //       arguments: [stabilityPool, token],
+  //     });
+  //     return vusdCoin;
+  //   });
+  //   if (otherCoins.length > 0) {
+  //     tx.mergeCoins(mainCoin, otherCoins);
+  //   }
+  //   const [outCoin] = tx.splitCoins(mainCoin, [amount]);
+  //   const [token] = this.depositStabilityPool(tx, mainCoin);
+  //   return [outCoin, token] as TransactionResult;
+  // }
 }

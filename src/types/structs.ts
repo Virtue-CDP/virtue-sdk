@@ -2,18 +2,13 @@ import { COLLATERAL_COIN } from "./coin";
 
 export type VaultInfo = {
   token: COLLATERAL_COIN;
-  baseFeeRate: number;
   interestRate: number;
-  bottleTableSize: string;
-  bottleTableId: string;
+  positionTableSize: string;
   collateralDecimal: number;
-  collateralVault: string;
-  latestRedemptionTime: number;
+  collateralBalance: string;
   minCollateralRatio: number;
-  mintedAmount: string;
-  minBottleSize: string;
-  maxMintAmount: string;
-  recoveryModeThreshold: number;
+  supply: string;
+  maxSupply: string;
 };
 
 export type PositionInfo = {

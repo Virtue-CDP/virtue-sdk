@@ -12,42 +12,26 @@ type Float = {
         value: string;
     };
 };
+type Double = {
+    fields: {
+        value: string;
+    };
+};
 type VaultResponse = {
     balance: string;
     decimal: number;
-    min_debt_amount: string;
+    interest_rate: Double;
     limited_supply: {
         fields: {
             limit: string;
             supply: string;
         };
     };
-    liquidation_config: {
-        fields: {
-            mcr: Float;
-            ccr: Float;
-            bcr: Float;
-        };
-    };
+    min_collateral_ratio: Float;
     position_table: {
         fields: {
-            fee_rate: Float;
-            interest_rate: Float;
-            timestamp: number;
-            table: {
-                fields: {
-                    head: string | null;
-                    tail: string | null;
-                    id: {
-                        id: string;
-                    };
-                    size: string;
-                };
-            };
-        };
-    };
-    surplus_table: {
-        fields: {
+            head: string | null;
+            tail: string | null;
             id: {
                 id: string;
             };
@@ -55,64 +39,16 @@ type VaultResponse = {
         };
     };
 };
-type PositionResponse = {
-    type: string;
-    fields: {
-        coll_amount: string;
-        debt_amount: string;
-        interest_buffer: string;
-        interest_unit: {
-            type: string;
-            fields: {
-                value: string;
-            };
-        };
-    };
-};
-type PriceMapResponse = {
-    type: string;
-    price_map: {
-        type: string;
-        fields: {
-            contents: PriceObjResponse[];
-        };
-    };
-};
-type PriceObjResponse = {
-    type: string;
-    fields: {
-        key: {
-            type: string;
-            fields: {
-                name: string;
-            };
-        };
-        value: {
-            type: string;
-            fields: {
-                value: string;
-            };
-        };
-    };
-};
-type StabilityPoolResponse = {
-    balance: string;
-};
 
 type VaultInfo = {
     token: COLLATERAL_COIN;
-    baseFeeRate: number;
     interestRate: number;
-    bottleTableSize: string;
-    bottleTableId: string;
+    positionTableSize: string;
     collateralDecimal: number;
-    collateralVault: string;
-    latestRedemptionTime: number;
+    collateralBalance: string;
     minCollateralRatio: number;
-    mintedAmount: string;
-    minBottleSize: string;
-    maxMintAmount: string;
-    recoveryModeThreshold: number;
+    supply: string;
+    maxSupply: string;
 };
 type PositionInfo = {
     collateral: COLLATERAL_COIN;
@@ -138,6 +74,8 @@ declare class VirtueClient {
      */
     private rpcEndpoint;
     private client;
+    private pythConnection;
+    private pythClient;
     constructor(network?: string, owner?: string);
     getClient(): IotaClient;
     /**
@@ -145,27 +83,20 @@ declare class VirtueClient {
      */
     getAllVaults(): Promise<VaultInfoList>;
     /**
-     * @description Get prices from oracle
-     */
-    getPrices(): Promise<Record<COIN, number>>;
-    /**
      * @description Get Vault<token> object
      */
     getVault(token: COLLATERAL_COIN): Promise<VaultInfo>;
     getPositionsByDebtor(debtor: string): Promise<PositionInfo[]>;
-    getPosition(debtor: string, collateral: COLLATERAL_COIN): Promise<PositionInfo | undefined>;
-    getStabilityPool(): Promise<StabilityPoolInfo>;
-    getStabilityPoolBalances(account: string): Promise<StabilityPoolBalances>;
     /**
      * @description Create a price collector
      * @param collateral coin symbol, e.g "IOTA"
      */
-    newPriceCollector(tx: Transaction, coinSymbol: COLLATERAL_COIN): TransactionResult;
+    newPriceCollector(tx: Transaction, collateralSymbol: COLLATERAL_COIN): TransactionResult;
     /**
      * @description Get a price result
      * @param collateral coin symbol, e.g "IOTA"
      */
-    aggregatePrice(tx: Transaction, coinSymbol: COLLATERAL_COIN): TransactionResult;
+    aggregatePrice(tx: Transaction, collateralSymbol: COLLATERAL_COIN): Promise<TransactionResult>;
     /**
      * @description Get a request to Mange Position
      * @param tx
@@ -176,19 +107,28 @@ declare class VirtueClient {
      * @param the amount to withdraw
      * @returns ManageRequest
      */
-    requestManagePosition(tx: Transaction, coinSymbol: COLLATERAL_COIN, depositCoin: TransactionArgument, borrowAmount: string, repaymentCoin: TransactionArgument, withdrawAmount: string, accountObj?: string | TransactionArgument): TransactionResult;
+    debtorRequest(tx: Transaction, inputs: {
+        collateralSymbol: COLLATERAL_COIN;
+        depositCoin: TransactionArgument;
+        borrowAmount: string;
+        repaymentCoin: TransactionArgument;
+        withdrawAmount: string;
+        accountObj?: string | TransactionArgument;
+    }): TransactionResult;
     /**
      * @description Manage Position
      * @param tx
      * @param collateral coin symbol , e.g "IOTA"
-     * @param manager request, see this.requestManagePosition
+     * @param manager request, ex: see this.debtorRequest
      * @param price result, see this.getPriceResult
      * @param the position place to insert
      * @returns [Coin<T>, COIN<VUSD>]
      */
-    managePosition(tx: Transaction, coinSymbol: COLLATERAL_COIN, manageRequest: TransactionArgument, priceResult?: TransactionArgument, insertionPlace?: string): TransactionResult;
-    depositStabilityPool(tx: Transaction, vusdCoin: TransactionArgument): TransactionResult;
-    withdrawStabilityPool(tx: Transaction, tokens: TransactionArgument[], amount: string): TransactionResult;
+    updatePosition(tx: Transaction, inputs: {
+        collateralSymbol: COLLATERAL_COIN;
+        manageRequest: TransactionArgument;
+        priceResult?: TransactionArgument;
+    }): TransactionResult;
 }
 
 declare function getObjectNames(objectTypes: string[]): string[];
@@ -220,26 +160,20 @@ declare function getObjectFields(resp: IotaObjectResponse | IotaMoveObject | Iot
 declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
-declare const parsePositionObject: (resp: PositionResponse) => PositionInfo | undefined;
-declare const parseStabilityPoolObject: (fields: StabilityPoolResponse) => StabilityPoolInfo;
 
-declare function buildManagePositionTx(client: VirtueClient, tx: Transaction, sender: string, collateralSymbol: COLLATERAL_COIN, collateralAmount: string, borrowAmount: string, repaymentAmount: string, withrawAmount: string, insertionPlace?: string, accountObjId?: string, recipient?: string): Promise<void>;
-declare function buildDepositStabilityPoolTx(client: VirtueClient, tx: Transaction, sender: string, vusdAmount: string, recipient?: string): Promise<void>;
-declare function buildWithdrawStabilityPoolTx(client: VirtueClient, tx: Transaction, sender: string, vusdAmount: string, recipient?: string): Promise<boolean>;
+declare function buildManagePositionTx(client: VirtueClient, tx: Transaction, sender: string, collateralSymbol: COLLATERAL_COIN, collateralAmount: string, borrowAmount: string, repaymentAmount: string, withdrawAmount: string, accountObjId?: string, recipient?: string): Promise<void>;
 
 declare const COINS_TYPE_LIST: Record<COIN, string>;
 declare const COIN_DECIMALS: Record<COIN, number>;
 
-declare const ORIGINAL_FRAMEWORK_PACKAGE_ID = "0x6f8dd0377fe5469cd3456350ca13ae1799655fda06e90191b73ab1c0c0165e8f";
-declare const ORIGINAL_VUSD_PACKAGE_ID = "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081";
-declare const ORIGINAL_ORACLE_PACKAGE_ID = "0x3eb4e0b2c57fe9844db30c6bb2b775ed18fd775dd9d48955b78bcd0ac0ba8954";
-declare const ORIGINAL_CDP_PACKAGE_ID = "0x0731a9f5cbdb0a4aea3f540280a1a266502017867734240e29edc813074e7f60";
-declare const ORIGINAL_LIQUIDATION_PACKAGE_ID = "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
-declare const FRAMEWORK_PACKAGE_ID = "0x6f8dd0377fe5469cd3456350ca13ae1799655fda06e90191b73ab1c0c0165e8f";
-declare const VUSD_PACKAGE_ID = "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081";
-declare const ORACLE_PACKAGE_ID = "0xbc672e6330ab22078715f86e952ef1353d9f9b217c4579e47ce29eaec6f92655";
-declare const CDP_PACKAGE_ID = "0xc7c44274ee1739d0589b84443cb351fdf374d69d6ac2f8bc2b008ae5e0dc0a5f ";
-declare const LIQUIDATION_PACKAGE_ID = "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
+declare const ORIGINAL_FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
+declare const ORIGINAL_VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
+declare const ORIGINAL_ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
+declare const ORIGINAL_CDP_PACKAGE_ID = "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1";
+declare const FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
+declare const VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
+declare const ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
+declare const CDP_PACKAGE_ID = "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22 ";
 declare const CLOCK_OBJ: {
     objectId: string;
     mutable: boolean;
@@ -250,22 +184,15 @@ declare const TREASURY_OBJ: {
     mutable: boolean;
     initialSharedVersion: number;
 };
-declare const CDP_VERSION_OBJ: {
-    objectId: string;
-    mutable: boolean;
-    initialSharedVersion: number;
-};
 type VaultObjectInfo = {
     priceAggregater: SharedObjectRef;
     vault: SharedObjectRef;
+    pythPriceId?: string;
 };
 declare const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo>;
-declare const STABILITY_POOL_OBJ: SharedObjectRef;
-declare const TESTNET_PRICE_PACKAGE_ID = "0x2de2d918f5940978dc53aae2ea0687a4ca8a6736bd525f15ee17e9529048fa92";
-declare const TESTNET_PRICE_FEED_OBJ: {
-    objectId: string;
-    mutable: boolean;
-    initialSharedVersion: number;
-};
+declare const PYTH_STATE_ID = "0x6bc33855c7675e006f55609f61eebb1c8a104d8973a698ee9efd3127c210b37f";
+declare const WORMHOLE_STATE_ID = "0xd43b448afc9dd01deb18273ec39d8f27ddd4dd46b0922383874331771b70df73";
+declare const PYTH_RULE_PACKAGE_ID = "0xed5a8dac2ca41ae9bdc1c7f778b0949d3e26c18c51ed284c4cfa4030d0bb64c2";
+declare const PYTH_RULE_CONFIG_OBJ: SharedObjectRef;
 
-export { CDP_PACKAGE_ID, CDP_VERSION_OBJ, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, LIQUIDATION_PACKAGE_ID, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_LIQUIDATION_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, type PositionInfo, type PositionResponse, type PriceMapResponse, type PriceObjResponse, STABILITY_POOL_OBJ, type StabilityPoolBalances, type StabilityPoolInfo, type StabilityPoolResponse, TESTNET_PRICE_FEED_OBJ, TESTNET_PRICE_PACKAGE_ID, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, buildDepositStabilityPoolTx, buildManagePositionTx, buildWithdrawStabilityPoolTx, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parsePositionObject, parseStabilityPoolObject, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, buildManagePositionTx, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };

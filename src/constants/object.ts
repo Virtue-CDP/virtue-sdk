@@ -4,28 +4,28 @@ import { SharedObjectRef } from "@iota/iota-sdk/dist/cjs/bcs/types";
 /// Original Package IDs
 
 export const ORIGINAL_FRAMEWORK_PACKAGE_ID =
-  "0x6f8dd0377fe5469cd3456350ca13ae1799655fda06e90191b73ab1c0c0165e8f";
+  "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
 export const ORIGINAL_VUSD_PACKAGE_ID =
-  "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081";
+  "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
 export const ORIGINAL_ORACLE_PACKAGE_ID =
-  "0x3eb4e0b2c57fe9844db30c6bb2b775ed18fd775dd9d48955b78bcd0ac0ba8954";
+  "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 export const ORIGINAL_CDP_PACKAGE_ID =
-  "0x0731a9f5cbdb0a4aea3f540280a1a266502017867734240e29edc813074e7f60";
-export const ORIGINAL_LIQUIDATION_PACKAGE_ID =
-  "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
+  "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1";
+// export const ORIGINAL_LIQUIDATION_PACKAGE_ID =
+//   "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
 
 /// Latest Package IDs
 
 export const FRAMEWORK_PACKAGE_ID =
-  "0x6f8dd0377fe5469cd3456350ca13ae1799655fda06e90191b73ab1c0c0165e8f";
+  "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
 export const VUSD_PACKAGE_ID =
-  "0x929065320c756b8a4a841deeed013bd748ee45a28629c4aaafc56d8948ebb081";
+  "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
 export const ORACLE_PACKAGE_ID =
-  "0xbc672e6330ab22078715f86e952ef1353d9f9b217c4579e47ce29eaec6f92655";
+  "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 export const CDP_PACKAGE_ID =
-  "0xc7c44274ee1739d0589b84443cb351fdf374d69d6ac2f8bc2b008ae5e0dc0a5f ";
-export const LIQUIDATION_PACKAGE_ID =
-  "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
+  "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22 ";
+// export const LIQUIDATION_PACKAGE_ID =
+//   "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
 
 /// Shared Objects
 
@@ -38,68 +38,66 @@ export const CLOCK_OBJ = {
 
 export const TREASURY_OBJ = {
   objectId:
-    "0x4e2e41f0158bce26c8e8ccc62be3ab5326d8b294a2bcccfbe0e7298885f66eb7",
+    "0x81f525f4fa5b2d3cf58677d3e39aabc4b0a1ca25cbba605033cfe417e47b0a16",
   mutable: true,
-  initialSharedVersion: 190869396,
-};
-
-export const CDP_VERSION_OBJ = {
-  objectId:
-    "0xb67e79921b2b71e77e5bd1adf28c9d47a8ad5bd22e024bbd90797514c39b068d",
-  mutable: false,
-  initialSharedVersion: 190869403,
+  initialSharedVersion: 22329876,
 };
 
 export type VaultObjectInfo = {
   // symbol: COIN;
   priceAggregater: SharedObjectRef;
   vault: SharedObjectRef;
+  pythPriceId?: string;
 };
 
 export const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo> = {
   IOTA: {
     priceAggregater: {
       objectId:
-        "0x9f3c9d72993efd5e2e543ad69bdc0bbe1bd9873c3a61fdf32c0cf48660a5f2c8",
-      mutable: true,
-      initialSharedVersion: 190869399,
+        "0x052c40b4e8f16df5238457f3a7b3b0eeaa49c6bc8acc22f6a7790ab32495b2c6",
+      mutable: false,
+      initialSharedVersion: 22329880,
     },
     vault: {
       objectId:
-        "0xbbf7b7667aca64405e8756f6974f41bd648bd1bc40dfc2b1cfe2d6ec419eedb1",
+        "0xaf306be8419cf059642acdba3b4e79a5ae893101ae62c8331cefede779ef48d5",
       mutable: true,
-      initialSharedVersion: 237544284,
+      initialSharedVersion: 22329895,
     },
+    pythPriceId:
+      "0xc7b72e5d860034288c9335d4d325da4272fe50c92ab72249d58f6cbba30e4c44",
   },
   stIOTA: {
     priceAggregater: {
       objectId:
-        "0x0898681c27fa8912905f97a9803c63d7e56abcbac7175f686325eddb215efebd",
-      mutable: true,
-      initialSharedVersion: 246871816,
+        "0x8c730f64aa369eed69ddf7eea39c78bf0afd3f9fbb4ee0dfe457f6dea5a0f4ed",
+      mutable: false,
+      initialSharedVersion: 22329881,
     },
     vault: {
       objectId:
-        "0xc6b28c98e0c1c6fa282affd3b8db8e9a5ed143aed4e3b5bd1d1bc6f34dad3861",
+        "0xc9cb494657425f350af0948b8509efdd621626922e9337fd65eb161ec33de259",
       mutable: true,
-      initialSharedVersion: 246871815,
+      initialSharedVersion: 22329896,
     },
   },
 };
 
-export const STABILITY_POOL_OBJ: SharedObjectRef = {
+export const PYTH_STATE_ID =
+  "0x6bc33855c7675e006f55609f61eebb1c8a104d8973a698ee9efd3127c210b37f";
+export const WORMHOLE_STATE_ID =
+  "0xd43b448afc9dd01deb18273ec39d8f27ddd4dd46b0922383874331771b70df73";
+export const PYTH_RULE_PACKAGE_ID =
+  "0xed5a8dac2ca41ae9bdc1c7f778b0949d3e26c18c51ed284c4cfa4030d0bb64c2";
+export const PYTH_RULE_CONFIG_OBJ: SharedObjectRef = {
   objectId:
-    "0x963b3d757dcd5ad14773a503eb481143b64d3686aebdf6a90443d908582188e0",
-  initialSharedVersion: 252695564,
-  mutable: true,
-};
-
-// only on testnet
-export const TESTNET_PRICE_PACKAGE_ID =
-  "0x2de2d918f5940978dc53aae2ea0687a4ca8a6736bd525f15ee17e9529048fa92";
-export const TESTNET_PRICE_FEED_OBJ = {
-  objectId:
-    "0x05cc35b8d331a3893f80b9ca6c70c3b75298e9cbf1b5d707b6d18c40b0b3da5d",
+    "0xbcc4f6e3ca3d4a83eac39282ab7d1cb086924c58bef825d69c33b00fea1105b8",
+  initialSharedVersion: 22329882,
   mutable: false,
-  initialSharedVersion: 190869400,
 };
+// export const STABILITY_POOL_OBJ: SharedObjectRef = {
+//   objectId:
+//     "0x963b3d757dcd5ad14773a503eb481143b64d3686aebdf6a90443d908582188e0",
+//   initialSharedVersion: 252695564,
+//   mutable: true,
+// };

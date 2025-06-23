@@ -30,7 +30,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@iota/iota-sdk": "^0.6.0",
+    "@iota/iota-sdk": "^1.2.0",
+    "@pythnetwork/pyth-iota-js": "^2.1.0",
     "@types/superstruct": "^0.8.2",
     "superstruct": "^1.0.3"
   },
