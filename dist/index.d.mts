@@ -66,7 +66,7 @@ type StabilityPoolInfo = {
 
 declare class VirtueClient {
     network: string;
-    owner: string;
+    sender: string;
     /**
      * @description a TS wrapper over Virtue CDP client.
      * @param network connection to fullnode: 'mainnet' | 'testnet' | 'devnet' | 'localnet' | string
@@ -76,7 +76,11 @@ declare class VirtueClient {
     private client;
     private pythConnection;
     private pythClient;
-    constructor(network?: string, owner?: string);
+    private transaction;
+    constructor(network?: string, sender?: string);
+    /**
+     * @description Get this.client (IotaClient)
+     */
     getClient(): IotaClient;
     /**
      * @description Get all vault objects
@@ -86,28 +90,42 @@ declare class VirtueClient {
      * @description Get Vault<token> object
      */
     getVault(token: COLLATERAL_COIN): Promise<VaultInfo>;
-    getPositionsByDebtor(debtor: string): Promise<PositionInfo[]>;
+    /**
+     * @description Get debtor's position data
+     */
+    getDebtorPositions(debtor?: string): Promise<PositionInfo[]>;
+    /**
+     * @description Reset this.transaction
+     */
+    resetTransaction(): void;
+    /**
+     * @description return Transaction
+     * @returns Transaction
+     */
+    getTransaction(): Transaction;
     /**
      * @description Create a price collector
      * @param collateral coin symbol, e.g "IOTA"
+     * @return [PriceCollector]
      */
-    newPriceCollector(tx: Transaction, collateralSymbol: COLLATERAL_COIN): TransactionResult;
+    newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionResult;
     /**
      * @description Get a price result
      * @param collateral coin symbol, e.g "IOTA"
+     * @return [PriceResult]
      */
-    aggregatePrice(tx: Transaction, collateralSymbol: COLLATERAL_COIN): Promise<TransactionResult>;
+    aggregatePrice(collateralSymbol: COLLATERAL_COIN): Promise<TransactionResult>;
     /**
      * @description Get a request to Mange Position
-     * @param tx
-     * @param collateral coin symbol , e.g "IOTA"
-     * @param collateral input coin
-     * @param the amount to borrow
-     * @param repyment input coin (always VUSD)
-     * @param the amount to withdraw
-     * @returns ManageRequest
+     * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
+     * @param depositCoin: collateral input coin
+     * @param borrowAmount: the amount to borrow
+     * @param repaymentCoin: repyment input coin (always VUSD)
+     * @param withdrawAmount: the amount to withdraw
+     * @param accountObj (optional): account object id or transaction argument
+     * @returns [UpdateRequest]
      */
-    debtorRequest(tx: Transaction, inputs: {
+    debtorRequest(inputs: {
         collateralSymbol: COLLATERAL_COIN;
         depositCoin: TransactionArgument;
         borrowAmount: string;
@@ -117,18 +135,25 @@ declare class VirtueClient {
     }): TransactionResult;
     /**
      * @description Manage Position
-     * @param tx
-     * @param collateral coin symbol , e.g "IOTA"
-     * @param manager request, ex: see this.debtorRequest
-     * @param price result, see this.getPriceResult
-     * @param the position place to insert
+     * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
+     * @param updateRequest: manager request, ex: see this.debtorRequest
+     * @param priceResult: price result, see this.aggregatePrice
      * @returns [Coin<T>, COIN<VUSD>]
      */
-    updatePosition(tx: Transaction, inputs: {
+    updatePosition(inputs: {
         collateralSymbol: COLLATERAL_COIN;
-        manageRequest: TransactionArgument;
+        updateRequest: TransactionArgument;
         priceResult?: TransactionArgument;
     }): TransactionResult;
+    buildManagePositionTransaction(inputs: {
+        collateralSymbol: COLLATERAL_COIN;
+        collateralAmount: string;
+        borrowAmount: string;
+        repaymentAmount: string;
+        withdrawAmount: string;
+        accountObjId?: string;
+        recipient?: string | "StabilityPool";
+    }): Promise<Transaction>;
 }
 
 declare function getObjectNames(objectTypes: string[]): string[];
@@ -160,8 +185,6 @@ declare function getObjectFields(resp: IotaObjectResponse | IotaMoveObject | Iot
 declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
-
-declare function buildManagePositionTx(client: VirtueClient, tx: Transaction, sender: string, collateralSymbol: COLLATERAL_COIN, collateralAmount: string, borrowAmount: string, repaymentAmount: string, withdrawAmount: string, accountObjId?: string, recipient?: string): Promise<void>;
 
 declare const COINS_TYPE_LIST: Record<COIN, string>;
 declare const COIN_DECIMALS: Record<COIN, number>;
@@ -195,4 +218,4 @@ declare const WORMHOLE_STATE_ID = "0xd43b448afc9dd01deb18273ec39d8f27ddd4dd46b09
 declare const PYTH_RULE_PACKAGE_ID = "0xed5a8dac2ca41ae9bdc1c7f778b0949d3e26c18c51ed284c4cfa4030d0bb64c2";
 declare const PYTH_RULE_CONFIG_OBJ: SharedObjectRef;
 
-export { CDP_PACKAGE_ID, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, buildManagePositionTx, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };

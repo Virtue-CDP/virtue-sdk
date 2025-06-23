@@ -30,6 +30,7 @@ import {
   // StabilityPoolInfo,
 } from "@/types";
 import {
+  getInputCoins,
   // formatBigInt,e
   getObjectFields,
   getPriceResultType,
@@ -43,7 +44,7 @@ import {
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/dist/cjs/bcs";
 
-const DUMMY_ADDRESS = "0x0";
+const DUMMY_ADDRESS = "0xcafe";
 
 export class VirtueClient {
   /**
@@ -52,13 +53,14 @@ export class VirtueClient {
    * @param owner (optional) address of the current user (default: DUMMY_ADDRESS)
    */
   private rpcEndpoint: string;
-  private client: IotaClient;
+  public iotaClient: IotaClient;
   private pythConnection: IotaPriceServiceConnection;
   private pythClient: IotaPythClient;
+  private transaction: Transaction;
 
   constructor(
     public network: string = "mainnet",
-    public owner: string = DUMMY_ADDRESS,
+    public sender: string = DUMMY_ADDRESS,
   ) {
     if (
       network == "mainnet" ||
@@ -71,23 +73,21 @@ export class VirtueClient {
       this.rpcEndpoint = network as string;
     }
 
-    this.client = new IotaClient({ url: this.rpcEndpoint });
+    this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
       "https://hermes.pyth.network",
     );
     /* eslint-disable  @typescript-eslint/no-explicit-any */
     this.pythClient = new IotaPythClient(
-      this.client as any,
+      this.iotaClient as any,
       PYTH_STATE_ID,
       WORMHOLE_STATE_ID,
     );
+    this.transaction = new Transaction();
   }
 
-  getClient() {
-    return this.client;
-  }
+  /* ----- Query ----- */
 
-  // Query
   /**
    * @description Get all vault objects
    */
@@ -96,7 +96,7 @@ export class VirtueClient {
     const vaultObjectIds = Object.values(VAULT_MAP).map(
       (v) => v.vault.objectId,
     );
-    const vaultResults = await this.client.multiGetObjects({
+    const vaultResults = await this.iotaClient.multiGetObjects({
       ids: vaultObjectIds,
       options: {
         showContent: true,
@@ -124,7 +124,7 @@ export class VirtueClient {
    * @description Get Vault<token> object
    */
   async getVault(token: COLLATERAL_COIN): Promise<VaultInfo> {
-    const res = await this.client.getObject({
+    const res = await this.iotaClient.getObject({
       id: VAULT_MAP[token].vault.objectId,
       options: {
         showContent: true,
@@ -135,25 +135,32 @@ export class VirtueClient {
     return parseVaultObject(token, fields);
   }
 
-  async getPositionsByDebtor(debtor: string): Promise<PositionInfo[]> {
+  /**
+   * @description Get debtor's position data
+   */
+  async getDebtorPositions(debtor?: string): Promise<PositionInfo[]> {
     const tx = new Transaction();
     const clockObj = tx.sharedObjectRef(CLOCK_OBJ);
     const tokenList = Object.keys(VAULT_MAP) as COLLATERAL_COIN[];
+    const debtorAddr = debtor ?? this.sender;
+    if (debtorAddr === DUMMY_ADDRESS) {
+      throw new Error("Debtor address is required");
+    }
     tokenList.map((token) => {
       tx.moveCall({
         target: `${CDP_PACKAGE_ID}::vault::try_get_position_data`,
         typeArguments: [COINS_TYPE_LIST[token]],
         arguments: [
           tx.sharedObjectRef(VAULT_MAP[token].vault),
-          tx.pure.address(debtor),
+          tx.pure.address(debtorAddr),
           clockObj,
         ],
       });
     });
 
-    const res = await this.getClient().devInspectTransactionBlock({
+    const res = await this.iotaClient.devInspectTransactionBlock({
       transactionBlock: tx,
-      sender: debtor,
+      sender: debtor ?? this.sender,
     });
     if (!res.results) return [];
 
@@ -181,7 +188,7 @@ export class VirtueClient {
   }
 
   // async getStabilityPool(): Promise<StabilityPoolInfo> {
-  //   const res = await this.client.getObject({
+  //   const res = await this.iotaClient.getObject({
   //     id: STABILITY_POOL_OBJ.objectId,
   //     options: {
   //       showContent: true,
@@ -194,7 +201,7 @@ export class VirtueClient {
   // async getStabilityPoolBalances(
   //   account: string,
   // ): Promise<StabilityPoolBalances> {
-  //   const tokensRes = await this.client.getOwnedObjects({
+  //   const tokensRes = await this.iotaClient.getOwnedObjects({
   //     owner: account,
   //     filter: {
   //       StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`,
@@ -231,15 +238,30 @@ export class VirtueClient {
   //   }
   // }
 
+  /* ----- Transaction Methods ----- */
+
+  /**
+   * @description Reset this.transaction
+   */
+  resetTransaction() {
+    this.transaction = new Transaction();
+  }
+
+  /**
+   * @description return Transaction
+   * @returns Transaction
+   */
+  getTransaction(): Transaction {
+    return this.transaction;
+  }
+
   /**
    * @description Create a price collector
    * @param collateral coin symbol, e.g "IOTA"
+   * @return [PriceCollector]
    */
-  newPriceCollector(
-    tx: Transaction,
-    collateralSymbol: COLLATERAL_COIN,
-  ): TransactionResult {
-    return tx.moveCall({
+  newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionResult {
+    return this.transaction.moveCall({
       target: `${ORACLE_PACKAGE_ID}::collector::new`,
       typeArguments: [COINS_TYPE_LIST[collateralSymbol]],
     });
@@ -248,12 +270,12 @@ export class VirtueClient {
   /**
    * @description Get a price result
    * @param collateral coin symbol, e.g "IOTA"
+   * @return [PriceResult]
    */
   async aggregatePrice(
-    tx: Transaction,
     collateralSymbol: COLLATERAL_COIN,
   ): Promise<TransactionResult> {
-    const [collector] = this.newPriceCollector(tx, collateralSymbol);
+    const [collector] = this.newPriceCollector(collateralSymbol);
     const coinType = COINS_TYPE_LIST[collateralSymbol];
     const vaultInfo = VAULT_MAP[collateralSymbol];
     if (vaultInfo.pythPriceId) {
@@ -261,52 +283,53 @@ export class VirtueClient {
         vaultInfo.pythPriceId,
       ]);
       const [priceInfoObjId] = await this.pythClient.updatePriceFeeds(
-        tx as any,
+        this.transaction as any,
         updateData,
         [vaultInfo.pythPriceId],
       );
-      tx.moveCall({
+      this.transaction.moveCall({
         target: `${PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
         typeArguments: [coinType],
         arguments: [
           collector,
-          tx.sharedObjectRef(PYTH_RULE_CONFIG_OBJ),
-          tx.sharedObjectRef(CLOCK_OBJ),
-          tx.object(PYTH_STATE_ID),
-          tx.object(priceInfoObjId),
+          this.transaction.sharedObjectRef(PYTH_RULE_CONFIG_OBJ),
+          this.transaction.sharedObjectRef(CLOCK_OBJ),
+          this.transaction.object(PYTH_STATE_ID),
+          this.transaction.object(priceInfoObjId),
         ],
       });
-      return tx.moveCall({
+      return this.transaction.moveCall({
         target: `${ORACLE_PACKAGE_ID}::aggregater::aggregate`,
         typeArguments: [coinType],
-        arguments: [tx.sharedObjectRef(vaultInfo.priceAggregater), collector],
+        arguments: [
+          this.transaction.sharedObjectRef(vaultInfo.priceAggregater),
+          collector,
+        ],
       });
     } else {
-      return this.aggregatePrice(tx, "IOTA");
+      // TODO: integrate stIOTA
+      return this.aggregatePrice("IOTA");
     }
   }
 
   /**
    * @description Get a request to Mange Position
-   * @param tx
-   * @param collateral coin symbol , e.g "IOTA"
-   * @param collateral input coin
-   * @param the amount to borrow
-   * @param repyment input coin (always VUSD)
-   * @param the amount to withdraw
-   * @returns ManageRequest
+   * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
+   * @param depositCoin: collateral input coin
+   * @param borrowAmount: the amount to borrow
+   * @param repaymentCoin: repyment input coin (always VUSD)
+   * @param withdrawAmount: the amount to withdraw
+   * @param accountObj (optional): account object id or transaction argument
+   * @returns [UpdateRequest]
    */
-  debtorRequest(
-    tx: Transaction,
-    inputs: {
-      collateralSymbol: COLLATERAL_COIN;
-      depositCoin: TransactionArgument;
-      borrowAmount: string;
-      repaymentCoin: TransactionArgument;
-      withdrawAmount: string;
-      accountObj?: string | TransactionArgument;
-    },
-  ) {
+  debtorRequest(inputs: {
+    collateralSymbol: COLLATERAL_COIN;
+    depositCoin: TransactionArgument;
+    borrowAmount: string;
+    repaymentCoin: TransactionArgument;
+    withdrawAmount: string;
+    accountObj?: string | TransactionArgument;
+  }): TransactionResult {
     const {
       collateralSymbol,
       depositCoin,
@@ -318,68 +341,65 @@ export class VirtueClient {
     const coinType = COINS_TYPE_LIST[collateralSymbol];
     const vaultId = VAULT_MAP[collateralSymbol].vault.objectId;
     const [accountReq] = accountObj
-      ? tx.moveCall({
+      ? this.transaction.moveCall({
           target: `${FRAMEWORK_PACKAGE_ID}::account::request_with_account`,
           arguments: [
-            typeof accountObj === "string" ? tx.object(accountObj) : accountObj,
+            typeof accountObj === "string"
+              ? this.transaction.object(accountObj)
+              : accountObj,
           ],
         })
-      : tx.moveCall({
+      : this.transaction.moveCall({
           target: `${FRAMEWORK_PACKAGE_ID}::account::request`,
         });
-    return tx.moveCall({
+    return this.transaction.moveCall({
       target: `${CDP_PACKAGE_ID}::request::debtor_request`,
       typeArguments: [coinType],
       arguments: [
         accountReq,
-        tx.sharedObjectRef(TREASURY_OBJ),
-        tx.pure.id(vaultId),
+        this.transaction.sharedObjectRef(TREASURY_OBJ),
+        this.transaction.pure.id(vaultId),
         depositCoin,
-        tx.pure.u64(borrowAmount),
+        this.transaction.pure.u64(borrowAmount),
         repaymentCoin,
-        tx.pure.u64(withdrawAmount),
+        this.transaction.pure.u64(withdrawAmount),
       ],
     });
   }
 
   /**
    * @description Manage Position
-   * @param tx
-   * @param collateral coin symbol , e.g "IOTA"
-   * @param manager request, ex: see this.debtorRequest
-   * @param price result, see this.getPriceResult
-   * @param the position place to insert
+   * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
+   * @param updateRequest: manager request, ex: see this.debtorRequest
+   * @param priceResult: price result, see this.aggregatePrice
    * @returns [Coin<T>, COIN<VUSD>]
    */
-  updatePosition(
-    tx: Transaction,
-    inputs: {
-      collateralSymbol: COLLATERAL_COIN;
-      manageRequest: TransactionArgument;
-      priceResult?: TransactionArgument;
-    },
-  ): TransactionResult {
-    const { collateralSymbol, manageRequest, priceResult } = inputs;
+  updatePosition(inputs: {
+    collateralSymbol: COLLATERAL_COIN;
+    updateRequest: TransactionArgument;
+    priceResult?: TransactionArgument;
+  }): TransactionResult {
+    const { collateralSymbol, updateRequest, priceResult } = inputs;
     const vault = VAULT_MAP[collateralSymbol].vault;
     const priceResultOpt = priceResult
-      ? tx.moveCall({
+      ? this.transaction.moveCall({
           target: `0x1::option::some`,
           typeArguments: [getPriceResultType(collateralSymbol)],
           arguments: [priceResult],
         })
-      : tx.moveCall({
+      : this.transaction.moveCall({
           target: `0x1::option::none`,
           typeArguments: [getPriceResultType(collateralSymbol)],
         });
-    return tx.moveCall({
+    return this.transaction.moveCall({
       target: `${CDP_PACKAGE_ID}::vault::update_position`,
       typeArguments: [COINS_TYPE_LIST[collateralSymbol]],
       arguments: [
-        tx.sharedObjectRef(vault),
-        tx.sharedObjectRef(TREASURY_OBJ),
-        tx.sharedObjectRef(CLOCK_OBJ),
+        this.transaction.sharedObjectRef(vault),
+        this.transaction.sharedObjectRef(TREASURY_OBJ),
+        this.transaction.sharedObjectRef(CLOCK_OBJ),
         priceResultOpt,
-        manageRequest,
+        updateRequest,
       ],
     });
   }
@@ -414,4 +434,87 @@ export class VirtueClient {
   //   const [token] = this.depositStabilityPool(tx, mainCoin);
   //   return [outCoin, token] as TransactionResult;
   // }
+  //
+  //
+  //
+
+  /* ----- Transaction Methods ----- */
+  async buildManagePositionTransaction(inputs: {
+    collateralSymbol: COLLATERAL_COIN;
+    depositAmount: string;
+    borrowAmount: string;
+    repaymentAmount: string;
+    withdrawAmount: string;
+    accountObjId?: string;
+    recipient?: string | "StabilityPool";
+  }): Promise<Transaction> {
+    const {
+      collateralSymbol,
+      depositAmount,
+      borrowAmount,
+      repaymentAmount,
+      withdrawAmount,
+      accountObjId,
+      recipient,
+    } = inputs;
+    const coinType = COINS_TYPE_LIST[collateralSymbol];
+    if (!this.sender) throw new Error("Sender is not set");
+    const [depositCoin] = await getInputCoins(
+      this.transaction,
+      this.iotaClient,
+      this.sender,
+      coinType,
+      depositAmount,
+    );
+    const [repaymentCoin] = await getInputCoins(
+      this.transaction,
+      this.iotaClient,
+      this.sender,
+      COINS_TYPE_LIST.VUSD,
+      repaymentAmount,
+    );
+    const [priceResult] =
+      Number(borrowAmount) > 0 || Number(withdrawAmount) > 0
+        ? await this.aggregatePrice(collateralSymbol)
+        : [undefined];
+    const [updateRequest] = this.debtorRequest({
+      collateralSymbol,
+      depositCoin,
+      borrowAmount,
+      repaymentCoin,
+      withdrawAmount,
+      accountObj: accountObjId,
+    });
+    const [collCoin, vusdCoin] = this.updatePosition({
+      collateralSymbol,
+      updateRequest,
+      priceResult,
+    });
+    if (Number(withdrawAmount) > 0) {
+      this.transaction.transferObjects([collCoin], recipient ?? this.sender);
+    } else {
+      this.transaction.moveCall({
+        target: "0x2::coin::destroy_zero",
+        typeArguments: [coinType],
+        arguments: [collCoin],
+      });
+    }
+    if (Number(borrowAmount) > 0) {
+      if (recipient === "StabilityPool") {
+        // TODO: integrate StabilityPool
+        // client.depositStabilityPool(tx, vusdCoin);
+        // tx.transferObjects([collCoin], recipient ?? sender);
+        this.transaction.transferObjects([vusdCoin], recipient ?? this.sender);
+      } else {
+        this.transaction.transferObjects([vusdCoin], recipient ?? this.sender);
+      }
+    } else {
+      this.transaction.moveCall({
+        target: "0x2::coin::destroy_zero",
+        typeArguments: [COINS_TYPE_LIST.VUSD],
+        arguments: [vusdCoin],
+      });
+    }
+    return this.transaction;
+  }
 }
