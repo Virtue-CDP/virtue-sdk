@@ -48,8 +48,6 @@ import {
 import { bcs } from "@iota/iota-sdk/bcs";
 import { isValidIotaAddress } from "@iota/iota-sdk/utils";
 
-const DUMMY_ADDRESS = "0xcafe";
-
 export class VirtueClient {
   /**
    * @description a TS wrapper over Virtue CDP client.
@@ -63,13 +61,13 @@ export class VirtueClient {
   private transaction: Transaction;
   public sender: string;
 
-  constructor(inputs: { rpcUrl?: string; sender?: string }) {
+  constructor(inputs: { rpcUrl?: string; sender: string }) {
     const { rpcUrl, sender } = inputs;
     this.rpcEndpoint = rpcUrl ?? getFullnodeUrl("mainnet");
-    if (sender && isValidIotaAddress(sender)) {
+    if (!isValidIotaAddress(sender)) {
       throw new Error("Invalid sender address");
     }
-    this.sender = sender ?? DUMMY_ADDRESS;
+    this.sender = sender;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
       "https://hermes.pyth.network",
@@ -163,7 +161,7 @@ export class VirtueClient {
     const clockObj = tx.sharedObjectRef(CLOCK_OBJ);
     const tokenList = Object.keys(VAULT_MAP) as COLLATERAL_COIN[];
     const debtorAddr = debtor ?? this.sender;
-    if (isValidIotaAddress(debtorAddr)) {
+    if (!isValidIotaAddress(debtorAddr)) {
       throw new Error("Invalid debtor address");
     }
     tokenList.map((token) => {
@@ -216,7 +214,8 @@ export class VirtueClient {
     account?: string,
   ): Promise<StabilityPoolBalances> {
     // TODO: devInspect stability getter fun
-    if (account && isValidIotaAddress(account)) {
+    const accountAddr = account ?? this.sender;
+    if (!isValidIotaAddress(accountAddr)) {
       throw new Error("Invalid account address");
     }
     return {
@@ -260,7 +259,6 @@ export class VirtueClient {
           amounts.map((amount) => this.transaction.pure.u64(amount)),
         );
       } else {
-        if (this.sender === DUMMY_ADDRESS) throw new Error("Sender is not set");
         const coinType = COIN_TYPES[coinSymbol];
         const { data: userCoins } = await this.iotaClient.getCoins({
           owner: this.sender,

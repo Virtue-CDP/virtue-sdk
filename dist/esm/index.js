@@ -213,15 +213,14 @@ import {
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
 import { isValidIotaAddress } from "@iota/iota-sdk/utils";
-var DUMMY_ADDRESS = "0xcafe";
 var VirtueClient = class {
   constructor(inputs) {
     const { rpcUrl, sender } = inputs;
     this.rpcEndpoint = rpcUrl ?? getFullnodeUrl("mainnet");
-    if (sender && isValidIotaAddress(sender)) {
+    if (!isValidIotaAddress(sender)) {
       throw new Error("Invalid sender address");
     }
-    this.sender = sender ?? DUMMY_ADDRESS;
+    this.sender = sender;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
       "https://hermes.pyth.network"
@@ -299,7 +298,7 @@ var VirtueClient = class {
     const clockObj = tx.sharedObjectRef(CLOCK_OBJ);
     const tokenList = Object.keys(VAULT_MAP);
     const debtorAddr = debtor ?? this.sender;
-    if (isValidIotaAddress(debtorAddr)) {
+    if (!isValidIotaAddress(debtorAddr)) {
       throw new Error("Invalid debtor address");
     }
     tokenList.map((token) => {
@@ -340,7 +339,8 @@ var VirtueClient = class {
     return { vusdBalance: 0 };
   }
   async getStabilityPoolBalances(account) {
-    if (account && isValidIotaAddress(account)) {
+    const accountAddr = account ?? this.sender;
+    if (!isValidIotaAddress(accountAddr)) {
       throw new Error("Invalid account address");
     }
     return {
@@ -378,7 +378,6 @@ var VirtueClient = class {
           amounts.map((amount) => this.transaction.pure.u64(amount))
         );
       } else {
-        if (this.sender === DUMMY_ADDRESS) throw new Error("Sender is not set");
         const coinType = COIN_TYPES[coinSymbol];
         const { data: userCoins } = await this.iotaClient.getCoins({
           owner: this.sender,

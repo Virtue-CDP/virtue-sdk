@@ -78,7 +78,7 @@ declare class VirtueClient {
     sender: string;
     constructor(inputs: {
         rpcUrl?: string;
-        sender?: string;
+        sender: string;
     });
     /**
      * @description Get this.iotaClient
