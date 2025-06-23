@@ -53,7 +53,7 @@ export class VirtueClient {
    * @param owner (optional) address of the current user (default: DUMMY_ADDRESS)
    */
   private rpcEndpoint: string;
-  public iotaClient: IotaClient;
+  private iotaClient: IotaClient;
   private pythConnection: IotaPriceServiceConnection;
   private pythClient: IotaPythClient;
   private transaction: Transaction;
@@ -84,6 +84,29 @@ export class VirtueClient {
       WORMHOLE_STATE_ID,
     );
     this.transaction = new Transaction();
+  }
+
+  /* ----- Getter ----- */
+
+  /**
+   * @description Get this.iotaClient
+   */
+  getIotaClient(): IotaClient {
+    return this.iotaClient;
+  }
+
+  /**
+   * @description Get this.pythConnection
+   */
+  getPythConnection(): IotaPriceServiceConnection {
+    return this.pythConnection;
+  }
+
+  /**
+   * @description Get this.pythClient
+   */
+  getPythClient(): IotaPythClient {
+    return this.pythClient;
   }
 
   /* ----- Query ----- */

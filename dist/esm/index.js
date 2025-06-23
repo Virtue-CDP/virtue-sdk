@@ -296,24 +296,37 @@ var VirtueClient = class {
     } else {
       this.rpcEndpoint = network;
     }
-    this.client = new IotaClient({ url: this.rpcEndpoint });
+    this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
       "https://hermes.pyth.network"
     );
     this.pythClient = new IotaPythClient(
-      this.client,
+      this.iotaClient,
       PYTH_STATE_ID,
       WORMHOLE_STATE_ID
     );
     this.transaction = new Transaction();
   }
-  /* ----- Query ----- */
+  /* ----- Getter ----- */
   /**
-   * @description Get this.client (IotaClient)
+   * @description Get this.iotaClient
    */
-  getClient() {
-    return this.client;
+  getIotaClient() {
+    return this.iotaClient;
   }
+  /**
+   * @description Get this.pythConnection
+   */
+  getPythConnection() {
+    return this.pythConnection;
+  }
+  /**
+   * @description Get this.pythClient
+   */
+  getPythClient() {
+    return this.pythClient;
+  }
+  /* ----- Query ----- */
   /**
    * @description Get all vault objects
    */
@@ -321,7 +334,7 @@ var VirtueClient = class {
     const vaultObjectIds = Object.values(VAULT_MAP).map(
       (v) => v.vault.objectId
     );
-    const vaultResults = await this.client.multiGetObjects({
+    const vaultResults = await this.iotaClient.multiGetObjects({
       ids: vaultObjectIds,
       options: {
         showContent: true
@@ -343,7 +356,7 @@ var VirtueClient = class {
    * @description Get Vault<token> object
    */
   async getVault(token) {
-    const res = await this.client.getObject({
+    const res = await this.iotaClient.getObject({
       id: VAULT_MAP[token].vault.objectId,
       options: {
         showContent: true
@@ -374,7 +387,7 @@ var VirtueClient = class {
         ]
       });
     });
-    const res = await this.getClient().devInspectTransactionBlock({
+    const res = await this.iotaClient.devInspectTransactionBlock({
       transactionBlock: tx,
       sender: debtor ?? this.sender
     });
@@ -398,7 +411,7 @@ var VirtueClient = class {
     });
   }
   // async getStabilityPool(): Promise<StabilityPoolInfo> {
-  //   const res = await this.client.getObject({
+  //   const res = await this.iotaClient.getObject({
   //     id: STABILITY_POOL_OBJ.objectId,
   //     options: {
   //       showContent: true,
@@ -410,7 +423,7 @@ var VirtueClient = class {
   // async getStabilityPoolBalances(
   //   account: string,
   // ): Promise<StabilityPoolBalances> {
-  //   const tokensRes = await this.client.getOwnedObjects({
+  //   const tokensRes = await this.iotaClient.getOwnedObjects({
   //     owner: account,
   //     filter: {
   //       StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`,
@@ -620,26 +633,25 @@ var VirtueClient = class {
   async buildManagePositionTransaction(inputs) {
     const {
       collateralSymbol,
-      collateralAmount,
+      depositAmount,
       borrowAmount,
       repaymentAmount,
       withdrawAmount,
       accountObjId,
       recipient
     } = inputs;
-    const iotaClient = this.getClient();
     const coinType = COINS_TYPE_LIST[collateralSymbol];
     if (!this.sender) throw new Error("Sender is not set");
     const [depositCoin] = await getInputCoins(
       this.transaction,
-      iotaClient,
+      this.iotaClient,
       this.sender,
       coinType,
-      collateralAmount
+      depositAmount
     );
     const [repaymentCoin] = await getInputCoins(
       this.transaction,
-      iotaClient,
+      this.iotaClient,
       this.sender,
       COINS_TYPE_LIST.VUSD,
       repaymentAmount

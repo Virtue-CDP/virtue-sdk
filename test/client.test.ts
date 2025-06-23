@@ -30,8 +30,8 @@ describe("Interacting with VirtueClient", () => {
     expect(tx).toBeDefined();
     tx.setSender(client.sender);
     console.log(
-      client.iotaClient.dryRunTransactionBlock({
-        transactionBlock: await tx.build({ client: client.iotaClient }),
+      client.getIotaClient().dryRunTransactionBlock({
+        transactionBlock: await tx.build({ client: client.getIotaClient() }),
       }),
     );
   });

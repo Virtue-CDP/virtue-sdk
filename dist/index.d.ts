@@ -1,5 +1,6 @@
 import { Transaction, TransactionResult, TransactionArgument } from '@iota/iota-sdk/transactions';
 import { IotaClient, IotaObjectData, IotaParsedData, IotaObjectResponse, IotaMoveObject } from '@iota/iota-sdk/client';
+import { IotaPriceServiceConnection, IotaPythClient } from '@pythnetwork/pyth-iota-js';
 import * as superstruct from 'superstruct';
 import { Infer } from 'superstruct';
 import { SharedObjectRef } from '@iota/iota-sdk/dist/cjs/bcs/types';
@@ -73,15 +74,23 @@ declare class VirtueClient {
      * @param owner (optional) address of the current user (default: DUMMY_ADDRESS)
      */
     private rpcEndpoint;
-    private client;
+    private iotaClient;
     private pythConnection;
     private pythClient;
     private transaction;
     constructor(network?: string, sender?: string);
     /**
-     * @description Get this.client (IotaClient)
+     * @description Get this.iotaClient
      */
-    getClient(): IotaClient;
+    getIotaClient(): IotaClient;
+    /**
+     * @description Get this.pythConnection
+     */
+    getPythConnection(): IotaPriceServiceConnection;
+    /**
+     * @description Get this.pythClient
+     */
+    getPythClient(): IotaPythClient;
     /**
      * @description Get all vault objects
      */
@@ -147,7 +156,7 @@ declare class VirtueClient {
     }): TransactionResult;
     buildManagePositionTransaction(inputs: {
         collateralSymbol: COLLATERAL_COIN;
-        collateralAmount: string;
+        depositAmount: string;
         borrowAmount: string;
         repaymentAmount: string;
         withdrawAmount: string;
