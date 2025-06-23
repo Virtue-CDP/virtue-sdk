@@ -1,4 +1,4 @@
-import { Transaction, TransactionResult, TransactionArgument } from '@iota/iota-sdk/transactions';
+import { TransactionResult, Transaction, TransactionArgument } from '@iota/iota-sdk/transactions';
 import { IotaClient, IotaObjectData, IotaParsedData, IotaObjectResponse, IotaMoveObject } from '@iota/iota-sdk/client';
 import { IotaPriceServiceConnection, IotaPythClient } from '@pythnetwork/pyth-iota-js';
 import * as superstruct from 'superstruct';
@@ -105,6 +105,14 @@ declare class VirtueClient {
      */
     getDebtorPositions(debtor?: string): Promise<PositionInfo[]>;
     /**
+     * @description new zero coin
+     */
+    zeroCoin(coinSymbol: COIN): TransactionResult;
+    /**
+     * @description split the needed coins
+     */
+    splitInputCoins(coinSymbol: COIN, ...amounts: string[]): Promise<TransactionResult>;
+    /**
      * @description Reset this.transaction
      */
     resetTransaction(): void;
@@ -155,6 +163,23 @@ declare class VirtueClient {
         updateRequest: TransactionArgument;
         priceResult?: TransactionArgument;
     }): TransactionResult;
+    depositStabilityPool(inputs: {
+        vusdCoin: TransactionArgument;
+    }): void;
+    withdrawStabilityPool(inputs: {
+        amount: string;
+    }): TransactionResult;
+    /**
+     * @description build and return Transaction of manage position
+     * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
+     * @param depositAmount: how much amount to deposit (collateral)
+     * @param borrowAmount: how much amout to borrow (VUSD)
+     * @param repaymentAmount: how much amount to repay (VUSD)
+     * @param withdrawAmount: how much amount to withdraw (collateral)
+     * @param accountObjId: the Account object to hold position (undefined if just use EOA)
+     * @param recipient (optional): the recipient of the output coins
+     * @returns Transaction
+     */
     buildManagePositionTransaction(inputs: {
         collateralSymbol: COLLATERAL_COIN;
         depositAmount: string;
@@ -163,6 +188,22 @@ declare class VirtueClient {
         withdrawAmount: string;
         accountObjId?: string;
         recipient?: string | "StabilityPool";
+    }): Promise<Transaction>;
+    /**
+     * @description build and return Transaction of deposit stability pool
+     * @param depositAmount: how much amount to deposit (collateral)
+     * @returns Transaction
+     */
+    buildDepositStabilityPoolTransaction(inputs: {
+        depositAmount: string;
+    }): Promise<Transaction>;
+    /**
+     * @description build and return Transaction of withdraw stability pool
+     * @param withdrawAmount: how much amount to withdraw (collateral)
+     * @returns Transaction
+     */
+    buildWithdrawStabilityPoolTransaction(inputs: {
+        withdrawAmount: string;
     }): Promise<Transaction>;
 }
 
@@ -174,15 +215,6 @@ declare const formatUnits: (value: bigint, decimals: number) => string;
 declare const formatBigInt: (value: string, decimals?: number) => number;
 declare const parseUnits: (value: number | string, decimals: number) => bigint;
 declare const getPriceResultType: (coinSymbol: COLLATERAL_COIN) => string;
-
-declare function coinIntoBalance(tx: Transaction, coinType: string, coinInput: TransactionArgument | undefined): TransactionResult;
-declare function coinFromBalance(tx: Transaction, coinType: string, balanceInput: TransactionArgument): TransactionResult;
-declare function getInputCoins(tx: Transaction, client: IotaClient, owner: string, coinType: string, ...amounts: string[]): Promise<TransactionResult>;
-declare function getMainCoin(tx: Transaction, client: IotaClient, owner: string, coinType: string): Promise<TransactionResult | {
-    $kind: "Input";
-    Input: number;
-    type?: "object";
-} | undefined>;
 
 declare const ObjectContentFields: superstruct.Struct<Record<string, any>, null>;
 type ObjectContentFields = Infer<typeof ObjectContentFields>;
@@ -196,7 +228,7 @@ declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
 
-declare const COINS_TYPE_LIST: Record<COIN, string>;
+declare const COIN_TYPES: Record<COIN, string>;
 declare const COIN_DECIMALS: Record<COIN, number>;
 
 declare const ORIGINAL_FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
@@ -228,4 +260,4 @@ declare const CERT_RULE_PACKAGE_ID = "0x01edb9afe0663b8762d2e0a18923df8bee98d28f
 declare const CERT_NATIVE_POOL_OBJ: SharedObjectRef;
 declare const CERT_METADATA_OBJ: SharedObjectRef;
 
-export { CDP_PACKAGE_ID, CERT_METADATA_OBJ, CERT_NATIVE_POOL_OBJ, CERT_RULE_PACKAGE_ID, CLOCK_OBJ, type COIN, COINS_TYPE_LIST, COIN_DECIMALS, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, coinFromBalance, coinIntoBalance, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getInputCoins, getIotaObjectData, getMainCoin, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CERT_METADATA_OBJ, CERT_NATIVE_POOL_OBJ, CERT_RULE_PACKAGE_ID, CLOCK_OBJ, type COIN, COIN_DECIMALS, COIN_TYPES, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };

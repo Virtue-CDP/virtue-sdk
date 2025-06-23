@@ -11,7 +11,7 @@ import {
   CERT_NATIVE_POOL_OBJ,
   CERT_RULE_PACKAGE_ID,
   CLOCK_OBJ,
-  COINS_TYPE_LIST,
+  COIN_TYPES,
   FRAMEWORK_PACKAGE_ID,
   ORACLE_PACKAGE_ID,
   PYTH_RULE_CONFIG_OBJ,
@@ -27,14 +27,14 @@ import {
   COLLATERAL_COIN,
   PositionInfo,
   VaultInfoList,
+  COIN,
   // PositionResponse,
   // StabilityPoolBalances,
   // StabilityPoolResponse,
   // StabilityPoolInfo,
 } from "@/types";
 import {
-  getInputCoins,
-  // formatBigInt,e
+  // formatBigInt,
   getObjectFields,
   getPriceResultType,
   // parsePositionObject,
@@ -165,7 +165,7 @@ export class VirtueClient {
     tokenList.map((token) => {
       tx.moveCall({
         target: `${CDP_PACKAGE_ID}::vault::try_get_position_data`,
-        typeArguments: [COINS_TYPE_LIST[token]],
+        typeArguments: [COIN_TYPES[token]],
         arguments: [
           tx.sharedObjectRef(VAULT_MAP[token].vault),
           tx.pure.address(debtorAddr),
@@ -254,6 +254,66 @@ export class VirtueClient {
   //   }
   // }
 
+  /* ----- Transaction Utils ----- */
+
+  /**
+   * @description new zero coin
+   */
+  zeroCoin(coinSymbol: COIN): TransactionResult {
+    return this.transaction.moveCall({
+      target: "0x2::coin::zero",
+      typeArguments: [COIN_TYPES[coinSymbol]],
+    });
+  }
+
+  /**
+   * @description split the needed coins
+   */
+  async splitInputCoins(
+    coinSymbol: COIN,
+    ...amounts: string[]
+  ): Promise<TransactionResult> {
+    const totalAmount = amounts.reduce(
+      (sum, amount) => sum + Number(amount),
+      0,
+    );
+    if (totalAmount === 0) {
+      return this.zeroCoin(coinSymbol);
+    } else {
+      if (coinSymbol === "IOTA") {
+        return this.transaction.splitCoins(
+          this.transaction.gas,
+          amounts.map((amount) => this.transaction.pure.u64(amount)),
+        );
+      } else {
+        if (this.sender === DUMMY_ADDRESS) throw new Error("Sender is not set");
+        const coinType = COIN_TYPES[coinSymbol];
+        const { data: userCoins } = await this.iotaClient.getCoins({
+          owner: this.sender,
+          coinType,
+        });
+        const [mainCoin, ...otherCoins] = userCoins.map((coin) =>
+          this.transaction.objectRef({
+            objectId: coin.coinObjectId,
+            version: coin.version,
+            digest: coin.digest,
+          }),
+        );
+        if (!mainCoin) {
+          throw new Error("Not enough balance");
+        }
+
+        if (otherCoins.length > 0)
+          this.transaction.mergeCoins(mainCoin, otherCoins);
+
+        return this.transaction.splitCoins(
+          mainCoin,
+          amounts.map((amount) => this.transaction.pure.u64(amount)),
+        );
+      }
+    }
+  }
+
   /* ----- Transaction Methods ----- */
 
   /**
@@ -279,7 +339,7 @@ export class VirtueClient {
   newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionResult {
     return this.transaction.moveCall({
       target: `${ORACLE_PACKAGE_ID}::collector::new`,
-      typeArguments: [COINS_TYPE_LIST[collateralSymbol]],
+      typeArguments: [COIN_TYPES[collateralSymbol]],
     });
   }
 
@@ -292,7 +352,7 @@ export class VirtueClient {
     collateralSymbol: COLLATERAL_COIN,
   ): Promise<TransactionResult> {
     const [collector] = this.newPriceCollector(collateralSymbol);
-    const coinType = COINS_TYPE_LIST[collateralSymbol];
+    const coinType = COIN_TYPES[collateralSymbol];
     const vaultInfo = VAULT_MAP[collateralSymbol];
     if (vaultInfo.pythPriceId) {
       const updateData = await this.pythConnection.getPriceFeedsUpdateData([
@@ -336,7 +396,7 @@ export class VirtueClient {
       });
       return this.transaction.moveCall({
         target: `${ORACLE_PACKAGE_ID}::aggregater::aggregate`,
-        typeArguments: [COINS_TYPE_LIST.stIOTA],
+        typeArguments: [COIN_TYPES.stIOTA],
         arguments: [
           this.transaction.sharedObjectRef(vaultInfo.priceAggregater),
           collector,
@@ -373,7 +433,7 @@ export class VirtueClient {
       withdrawAmount,
       accountObj,
     } = inputs;
-    const coinType = COINS_TYPE_LIST[collateralSymbol];
+    const coinType = COIN_TYPES[collateralSymbol];
     const vaultId = VAULT_MAP[collateralSymbol].vault.objectId;
     const [accountReq] = accountObj
       ? this.transaction.moveCall({
@@ -428,7 +488,7 @@ export class VirtueClient {
         });
     return this.transaction.moveCall({
       target: `${CDP_PACKAGE_ID}::vault::update_position`,
-      typeArguments: [COINS_TYPE_LIST[collateralSymbol]],
+      typeArguments: [COIN_TYPES[collateralSymbol]],
       arguments: [
         this.transaction.sharedObjectRef(vault),
         this.transaction.sharedObjectRef(TREASURY_OBJ),
@@ -439,41 +499,31 @@ export class VirtueClient {
     });
   }
 
-  // depositStabilityPool(
-  //   tx: Transaction,
-  //   vusdCoin: TransactionArgument,
-  // ): TransactionResult {
-  //   return tx.moveCall({
-  //     target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::deposit`,
-  //     arguments: [tx.sharedObjectRef(STABILITY_POOL_OBJ), vusdCoin],
-  //   });
-  // }
+  depositStabilityPool(inputs: { vusdCoin: TransactionArgument }) {
+    // TODO: PTB of deposit SP
+    const { vusdCoin } = inputs;
+    this.transaction.transferObjects([vusdCoin], this.sender);
+  }
 
-  // withdrawStabilityPool(
-  //   tx: Transaction,
-  //   tokens: TransactionArgument[],
-  //   amount: string,
-  // ): TransactionResult {
-  //   const stabilityPool = tx.sharedObjectRef(STABILITY_POOL_OBJ);
-  //   const [mainCoin, ...otherCoins] = tokens.map((token) => {
-  //     const [vusdCoin] = tx.moveCall({
-  //       target: `${LIQUIDATION_PACKAGE_ID}::stablility_pool::withdraw`,
-  //       arguments: [stabilityPool, token],
-  //     });
-  //     return vusdCoin;
-  //   });
-  //   if (otherCoins.length > 0) {
-  //     tx.mergeCoins(mainCoin, otherCoins);
-  //   }
-  //   const [outCoin] = tx.splitCoins(mainCoin, [amount]);
-  //   const [token] = this.depositStabilityPool(tx, mainCoin);
-  //   return [outCoin, token] as TransactionResult;
-  // }
-  //
-  //
-  //
+  withdrawStabilityPool(inputs: { amount: string }): TransactionResult {
+    // TODO: PTB of withdraw SP
+    const { amount } = inputs;
+    return [this.transaction.pure.u64(amount)] as TransactionResult;
+  }
 
   /* ----- Transaction Methods ----- */
+
+  /**
+   * @description build and return Transaction of manage position
+   * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
+   * @param depositAmount: how much amount to deposit (collateral)
+   * @param borrowAmount: how much amout to borrow (VUSD)
+   * @param repaymentAmount: how much amount to repay (VUSD)
+   * @param withdrawAmount: how much amount to withdraw (collateral)
+   * @param accountObjId: the Account object to hold position (undefined if just use EOA)
+   * @param recipient (optional): the recipient of the output coins
+   * @returns Transaction
+   */
   async buildManagePositionTransaction(inputs: {
     collateralSymbol: COLLATERAL_COIN;
     depositAmount: string;
@@ -483,6 +533,7 @@ export class VirtueClient {
     accountObjId?: string;
     recipient?: string | "StabilityPool";
   }): Promise<Transaction> {
+    this.resetTransaction();
     const {
       collateralSymbol,
       depositAmount,
@@ -492,22 +543,13 @@ export class VirtueClient {
       accountObjId,
       recipient,
     } = inputs;
-    const coinType = COINS_TYPE_LIST[collateralSymbol];
+    const coinType = COIN_TYPES[collateralSymbol];
     if (!this.sender) throw new Error("Sender is not set");
-    const [depositCoin] = await getInputCoins(
-      this.transaction,
-      this.iotaClient,
-      this.sender,
-      coinType,
+    const [depositCoin] = await this.splitInputCoins(
+      collateralSymbol,
       depositAmount,
     );
-    const [repaymentCoin] = await getInputCoins(
-      this.transaction,
-      this.iotaClient,
-      this.sender,
-      COINS_TYPE_LIST.VUSD,
-      repaymentAmount,
-    );
+    const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     const [priceResult] =
       Number(borrowAmount) > 0 || Number(withdrawAmount) > 0
         ? await this.aggregatePrice(collateralSymbol)
@@ -536,20 +578,50 @@ export class VirtueClient {
     }
     if (Number(borrowAmount) > 0) {
       if (recipient === "StabilityPool") {
-        // TODO: integrate StabilityPool
-        // client.depositStabilityPool(tx, vusdCoin);
-        // tx.transferObjects([collCoin], recipient ?? sender);
-        this.transaction.transferObjects([vusdCoin], recipient ?? this.sender);
+        this.depositStabilityPool({ vusdCoin });
       } else {
         this.transaction.transferObjects([vusdCoin], recipient ?? this.sender);
       }
     } else {
       this.transaction.moveCall({
         target: "0x2::coin::destroy_zero",
-        typeArguments: [COINS_TYPE_LIST.VUSD],
+        typeArguments: [COIN_TYPES.VUSD],
         arguments: [vusdCoin],
       });
     }
-    return this.transaction;
+    return this.getTransaction();
+  }
+
+  /**
+   * @description build and return Transaction of deposit stability pool
+   * @param depositAmount: how much amount to deposit (collateral)
+   * @returns Transaction
+   */
+  async buildDepositStabilityPoolTransaction(inputs: {
+    depositAmount: string;
+  }): Promise<Transaction> {
+    this.resetTransaction();
+    const { depositAmount } = inputs;
+    const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
+    this.depositStabilityPool({ vusdCoin });
+    const tx = this.getTransaction();
+    this.resetTransaction();
+    return tx;
+  }
+
+  /**
+   * @description build and return Transaction of withdraw stability pool
+   * @param withdrawAmount: how much amount to withdraw (collateral)
+   * @returns Transaction
+   */
+  async buildWithdrawStabilityPoolTransaction(inputs: {
+    withdrawAmount: string;
+  }): Promise<Transaction> {
+    this.resetTransaction();
+    const { withdrawAmount: amount } = inputs;
+    this.withdrawStabilityPool({ amount });
+    const tx = this.getTransaction();
+    this.resetTransaction();
+    return tx;
   }
 }

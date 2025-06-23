@@ -1,6 +1,6 @@
 import { COIN } from "@/types";
 
-export const COINS_TYPE_LIST: Record<COIN, string> = {
+export const COIN_TYPES: Record<COIN, string> = {
   IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
   stIOTA:
     "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",

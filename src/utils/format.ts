@@ -1,10 +1,10 @@
 import { COIN, COLLATERAL_COIN } from "@/types";
-import { COINS_TYPE_LIST, ORIGINAL_ORACLE_PACKAGE_ID } from "@/constants";
+import { COIN_TYPES, ORIGINAL_ORACLE_PACKAGE_ID } from "@/constants";
 import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
 
 export function getObjectNames(objectTypes: string[]) {
-  const accept_coin_type = Object.values(COINS_TYPE_LIST);
-  const accept_coin_name = Object.keys(COINS_TYPE_LIST);
+  const accept_coin_type = Object.values(COIN_TYPES);
+  const accept_coin_name = Object.keys(COIN_TYPES);
 
   const coinTypeList = objectTypes.map(
     (type) => type.split("<").pop()?.replace(">", "") ?? "",
@@ -27,16 +27,16 @@ export const getCoinType = (str: string) => {
 
   if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
     const coinType = str.slice(startIndex + 1, endIndex);
-    return coinType === "0x2::iota::IOTA" ? COINS_TYPE_LIST.IOTA : coinType;
+    return coinType === "0x2::iota::IOTA" ? COIN_TYPES.IOTA : coinType;
   }
 
   return null;
 };
 
 export const getCoinSymbol = (coinType: string) => {
-  const coin = Object.keys(COINS_TYPE_LIST).find(
+  const coin = Object.keys(COIN_TYPES).find(
     (key) =>
-      normalizeIotaAddress(COINS_TYPE_LIST[key as COIN]) ===
+      normalizeIotaAddress(COIN_TYPES[key as COIN]) ===
       normalizeIotaAddress(coinType),
   );
   if (coin) {
@@ -108,5 +108,5 @@ export const parseUnits = (value: number | string, decimals: number) => {
 };
 
 export const getPriceResultType = (coinSymbol: COLLATERAL_COIN): string => {
-  return `${ORIGINAL_ORACLE_PACKAGE_ID}::result::PriceResult<${COINS_TYPE_LIST[coinSymbol]}>`;
+  return `${ORIGINAL_ORACLE_PACKAGE_ID}::result::PriceResult<${COIN_TYPES[coinSymbol]}>`;
 };
