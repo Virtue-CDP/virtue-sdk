@@ -212,7 +212,7 @@ import {
   IotaPythClient
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
-import { isValidIotaAddress } from "@iota/iota-sdk/dist/cjs/utils";
+import { isValidIotaAddress } from "@iota/iota-sdk/utils";
 var DUMMY_ADDRESS = "0xcafe";
 var VirtueClient = class {
   constructor(inputs) {
