@@ -212,11 +212,15 @@ var parseVaultObject = (coinSymbol, fields) => {
 
 var _pythiotajs = require('@pythnetwork/pyth-iota-js');
 var _bcs = require('@iota/iota-sdk/bcs');
+var _utils3 = require('@iota/iota-sdk/dist/cjs/utils');
 var DUMMY_ADDRESS = "0xcafe";
 var VirtueClient = class {
   constructor(inputs) {
     const { rpcUrl, sender } = inputs;
     this.rpcEndpoint = _nullishCoalesce(rpcUrl, () => ( _client.getFullnodeUrl.call(void 0, "mainnet")));
+    if (sender && _utils3.isValidIotaAddress.call(void 0, sender)) {
+      throw new Error("Invalid sender address");
+    }
     this.sender = _nullishCoalesce(sender, () => ( DUMMY_ADDRESS));
     this.iotaClient = new (0, _client.IotaClient)({ url: this.rpcEndpoint });
     this.pythConnection = new (0, _pythiotajs.IotaPriceServiceConnection)(
@@ -295,8 +299,8 @@ var VirtueClient = class {
     const clockObj = tx.sharedObjectRef(CLOCK_OBJ);
     const tokenList = Object.keys(VAULT_MAP);
     const debtorAddr = _nullishCoalesce(debtor, () => ( this.sender));
-    if (debtorAddr === DUMMY_ADDRESS) {
-      throw new Error("Debtor address is required");
+    if (_utils3.isValidIotaAddress.call(void 0, debtorAddr)) {
+      throw new Error("Invalid debtor address");
     }
     tokenList.map((token) => {
       tx.moveCall({
@@ -332,54 +336,21 @@ var VirtueClient = class {
       }
     });
   }
-  // async getStabilityPool(): Promise<StabilityPoolInfo> {
-  //   const res = await this.iotaClient.getObject({
-  //     id: STABILITY_POOL_OBJ.objectId,
-  //     options: {
-  //       showContent: true,
-  //     },
-  //   });
-  //   const fields = getObjectFields(res) as StabilityPoolResponse;
-  //   return parseStabilityPoolObject(fields);
-  // }
-  // async getStabilityPoolBalances(
-  //   account: string,
-  // ): Promise<StabilityPoolBalances> {
-  //   const tokensRes = await this.iotaClient.getOwnedObjects({
-  //     owner: account,
-  //     filter: {
-  //       StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`,
-  //     },
-  //     options: {
-  //       showContent: true,
-  //     },
-  //   });
-  //   if (tokensRes.data) {
-  //     const vusdBalances = tokensRes.data.map((token) => {
-  //       const tokenFields = getObjectFields(token);
-  //       if (tokenFields) {
-  //         return formatBigInt(tokenFields.amount, COIN_DECIMALS.VUSD);
-  //       } else {
-  //         return 0;
-  //       }
-  //     });
-  //     return {
-  //       vusdBalance: vusdBalances.reduce((x, y) => x + y, 0),
-  //       collBalances: {
-  //         IOTA: 0,
-  //         stIOTA: 0,
-  //       },
-  //     };
-  //   } else {
-  //     return {
-  //       vusdBalance: 0,
-  //       collBalances: {
-  //         IOTA: 0,
-  //         stIOTA: 0,
-  //       },
-  //     };
-  //   }
-  // }
+  async getStabilityPool() {
+    return { vusdBalance: 0 };
+  }
+  async getStabilityPoolBalances(account) {
+    if (account && _utils3.isValidIotaAddress.call(void 0, account)) {
+      throw new Error("Invalid account address");
+    }
+    return {
+      vusdBalance: 0,
+      collBalances: {
+        IOTA: 0,
+        stIOTA: 0
+      }
+    };
+  }
   /* ----- Transaction Utils ----- */
   /**
    * @description new zero coin

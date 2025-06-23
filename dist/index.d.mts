@@ -104,6 +104,8 @@ declare class VirtueClient {
      * @description Get debtor's position data
      */
     getDebtorPositions(debtor?: string): Promise<PositionInfo[]>;
+    getStabilityPool(): Promise<StabilityPoolInfo>;
+    getStabilityPoolBalances(account?: string): Promise<StabilityPoolBalances>;
     /**
      * @description new zero coin
      */

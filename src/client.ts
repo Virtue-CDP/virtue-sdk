@@ -28,10 +28,10 @@ import {
   PositionInfo,
   VaultInfoList,
   COIN,
+  StabilityPoolInfo,
+  StabilityPoolBalances,
   // PositionResponse,
-  // StabilityPoolBalances,
   // StabilityPoolResponse,
-  // StabilityPoolInfo,
 } from "@/types";
 import {
   // formatBigInt,
@@ -46,6 +46,7 @@ import {
   IotaPythClient,
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
+import { isValidIotaAddress } from "@iota/iota-sdk/dist/cjs/utils";
 
 const DUMMY_ADDRESS = "0xcafe";
 
@@ -65,6 +66,9 @@ export class VirtueClient {
   constructor(inputs: { rpcUrl?: string; sender?: string }) {
     const { rpcUrl, sender } = inputs;
     this.rpcEndpoint = rpcUrl ?? getFullnodeUrl("mainnet");
+    if (sender && isValidIotaAddress(sender)) {
+      throw new Error("Invalid sender address");
+    }
     this.sender = sender ?? DUMMY_ADDRESS;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
@@ -159,8 +163,8 @@ export class VirtueClient {
     const clockObj = tx.sharedObjectRef(CLOCK_OBJ);
     const tokenList = Object.keys(VAULT_MAP) as COLLATERAL_COIN[];
     const debtorAddr = debtor ?? this.sender;
-    if (debtorAddr === DUMMY_ADDRESS) {
-      throw new Error("Debtor address is required");
+    if (isValidIotaAddress(debtorAddr)) {
+      throw new Error("Invalid debtor address");
     }
     tokenList.map((token) => {
       tx.moveCall({
@@ -203,56 +207,26 @@ export class VirtueClient {
     });
   }
 
-  // async getStabilityPool(): Promise<StabilityPoolInfo> {
-  //   const res = await this.iotaClient.getObject({
-  //     id: STABILITY_POOL_OBJ.objectId,
-  //     options: {
-  //       showContent: true,
-  //     },
-  //   });
-  //   const fields = getObjectFields(res) as StabilityPoolResponse;
-  //   return parseStabilityPoolObject(fields);
-  // }
+  async getStabilityPool(): Promise<StabilityPoolInfo> {
+    // TODO: fetch StabilityPool object
+    return { vusdBalance: 0 };
+  }
 
-  // async getStabilityPoolBalances(
-  //   account: string,
-  // ): Promise<StabilityPoolBalances> {
-  //   const tokensRes = await this.iotaClient.getOwnedObjects({
-  //     owner: account,
-  //     filter: {
-  //       StructType: `${ORIGINAL_LIQUIDATION_PACKAGE_ID}::stablility_pool::StabilityToken`,
-  //     },
-  //     options: {
-  //       showContent: true,
-  //     },
-  //   });
-  //   if (tokensRes.data) {
-  //     const vusdBalances = tokensRes.data.map((token) => {
-  //       const tokenFields = getObjectFields(token);
-  //       if (tokenFields) {
-  //         return formatBigInt(tokenFields.amount, COIN_DECIMALS.VUSD);
-  //       } else {
-  //         return 0;
-  //       }
-  //     });
-
-  //     return {
-  //       vusdBalance: vusdBalances.reduce((x, y) => x + y, 0),
-  //       collBalances: {
-  //         IOTA: 0,
-  //         stIOTA: 0,
-  //       },
-  //     };
-  //   } else {
-  //     return {
-  //       vusdBalance: 0,
-  //       collBalances: {
-  //         IOTA: 0,
-  //         stIOTA: 0,
-  //       },
-  //     };
-  //   }
-  // }
+  async getStabilityPoolBalances(
+    account?: string,
+  ): Promise<StabilityPoolBalances> {
+    // TODO: devInspect stability getter fun
+    if (account && isValidIotaAddress(account)) {
+      throw new Error("Invalid account address");
+    }
+    return {
+      vusdBalance: 0,
+      collBalances: {
+        IOTA: 0,
+        stIOTA: 0,
+      },
+    };
+  }
 
   /* ----- Transaction Utils ----- */
 

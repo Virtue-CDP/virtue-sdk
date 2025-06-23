@@ -22,19 +22,4 @@ export type VaultResponse = {
   };
 };
 
-// export type PositionResponse = {
-//   type: string;
-//   fields: {
-//     coll_amount: string;
-//     debt_amount: string;
-//     interest_buffer: string;
-//     interest_unit: {
-//       type: string;
-//       fields: {
-//         value: string;
-//       };
-//     };
-//   };
-// };
-
 // export type StabilityPoolResponse = { balance: string };
