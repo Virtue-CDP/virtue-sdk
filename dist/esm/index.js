@@ -732,7 +732,8 @@ var VirtueClient = class {
     }
     if (Number(borrowAmount) > 0) {
       if (recipient === "StabilityPool") {
-        this.depositStabilityPool({ vusdCoin });
+        const [response2] = this.depositStabilityPool({ vusdCoin, recipient });
+        this.checkResponseForStabilityPool(response2);
       } else {
         this.transaction.transferObjects([vusdCoin], recipient ?? this.sender);
       }
