@@ -245,7 +245,7 @@ export class VirtueClient {
       collBalances[collSymbol as COLLATERAL_COIN] = 0;
     });
     if (!fields) {
-      return { vusdBalance: "0", collBalances };
+      return { vusdBalance: 0, collBalances };
     }
 
     const vusdBalance =

@@ -56,7 +56,7 @@ type PositionInfo = {
     debtAmount: string;
 };
 type StabilityPoolBalances = {
-    vusdBalance: string;
+    vusdBalance: number;
     collBalances: Partial<Record<COLLATERAL_COIN, number>>;
 };
 type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;

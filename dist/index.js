@@ -383,7 +383,7 @@ var VirtueClient = class {
       collBalances[collSymbol] = 0;
     });
     if (!fields) {
-      return { vusdBalance: "0", collBalances };
+      return { vusdBalance: 0, collBalances };
     }
     const vusdBalance = fields.value.fields.value.fields.vusd_balance.fields.value;
     const vecMap = fields.value.fields.value.fields.coll_balances.fields.contents;
