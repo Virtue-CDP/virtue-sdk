@@ -300,13 +300,22 @@ export class VirtueClient {
           throw new Error("Not enough balance");
         }
 
-        if (otherCoins.length > 0)
-          this.transaction.mergeCoins(mainCoin, otherCoins);
+        const ifMerge = otherCoins.length > 0;
 
-        return this.transaction.splitCoins(
+        if (ifMerge) {
+          this.transaction.mergeCoins(mainCoin, otherCoins);
+        }
+
+        const out = this.transaction.splitCoins(
           mainCoin,
           amounts.map((amount) => this.transaction.pure.u64(amount)),
         );
+
+        if (ifMerge) {
+          this.transaction.transferObjects([mainCoin], this.sender);
+        }
+
+        return out;
       }
     }
   }
