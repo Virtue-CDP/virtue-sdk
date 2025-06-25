@@ -714,7 +714,8 @@ export class VirtueClient {
     this.resetTransaction();
     const { depositAmount, recipient } = inputs;
     const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
-    this.depositStabilityPool({ vusdCoin, recipient });
+    const [response] = this.depositStabilityPool({ vusdCoin, recipient });
+    this.checkResponseForStabilityPool(response);
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
@@ -731,7 +732,12 @@ export class VirtueClient {
   }): Promise<Transaction> {
     this.resetTransaction();
     const { withdrawAmount: amount, accountObj } = inputs;
-    this.withdrawStabilityPool({ amount, accountObj });
+    const [vusdOut, response] = this.withdrawStabilityPool({
+      amount,
+      accountObj,
+    });
+    this.checkResponseForStabilityPool(response);
+    this.transaction.transferObjects([vusdOut], this.sender);
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
