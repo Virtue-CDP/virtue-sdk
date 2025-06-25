@@ -239,14 +239,14 @@ export class VirtueClient {
         value: accountAddr,
       },
     });
-    const fields = getObjectFields(res);
     const collBalances: Partial<Record<COLLATERAL_COIN, number>> = {};
     Object.keys(VAULT_MAP).map((collSymbol) => {
       collBalances[collSymbol as COLLATERAL_COIN] = 0;
     });
-    if (!fields) {
+    if (res.data?.content?.dataType !== "moveObject") {
       return { vusdBalance: 0, collBalances };
     }
+    const fields = res.data.content.fields as any;
 
     const vusdBalance =
       fields.value.fields.value.fields.vusd_balance.fields.value;

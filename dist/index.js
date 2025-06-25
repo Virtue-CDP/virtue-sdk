@@ -377,14 +377,14 @@ var VirtueClient = class {
         value: accountAddr
       }
     });
-    const fields = getObjectFields(res);
     const collBalances = {};
     Object.keys(VAULT_MAP).map((collSymbol) => {
       collBalances[collSymbol] = 0;
     });
-    if (!fields) {
+    if (_optionalChain([res, 'access', _17 => _17.data, 'optionalAccess', _18 => _18.content, 'optionalAccess', _19 => _19.dataType]) !== "moveObject") {
       return { vusdBalance: 0, collBalances };
     }
+    const fields = res.data.content.fields;
     const vusdBalance = fields.value.fields.value.fields.vusd_balance.fields.value;
     const vecMap = fields.value.fields.value.fields.coll_balances.fields.contents;
     vecMap.map((info) => {
