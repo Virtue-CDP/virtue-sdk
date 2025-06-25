@@ -19,7 +19,7 @@ import {
   PYTH_STATE_ID,
   STABILITY_POOL_OBJ,
   STABILITY_POOL_PACKAGE_ID,
-  // STABILITY_POOL_TABLE_ID,
+  STABILITY_POOL_TABLE_ID,
   TREASURY_OBJ,
   VAULT_MAP,
   WORMHOLE_STATE_ID,
@@ -33,23 +33,24 @@ import {
   COIN,
   StabilityPoolInfo,
   StabilityPoolBalances,
-  // PositionResponse,
-  // StabilityPoolResponse,
 } from "@/types";
-import {
-  // formatBigInt,
-  getObjectFields,
-  getPriceResultType,
-  // parsePositionObject,
-  // parseStabilityPoolObject,
-  parseVaultObject,
-} from "@/utils";
+import { getObjectFields, getPriceResultType, parseVaultObject } from "@/utils";
 import {
   IotaPriceServiceConnection,
   IotaPythClient,
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
 import { isValidIotaAddress } from "@iota/iota-sdk/utils";
+
+const getCoinSymbol = (coinType: string) => {
+  const coin = Object.keys(COIN_TYPES).find(
+    (key) => COIN_TYPES[key as COIN] === coinType,
+  );
+  if (coin) {
+    return coin as COIN;
+  }
+  return undefined;
+};
 
 export class VirtueClient {
   /**
@@ -227,29 +228,39 @@ export class VirtueClient {
   async getStabilityPoolBalances(
     account?: string,
   ): Promise<StabilityPoolBalances> {
-    // TODO: devInspect stability getter fun
     const accountAddr = account ?? this.sender;
     if (!isValidIotaAddress(accountAddr)) {
       throw new Error("Invalid account address");
     }
-    // const res = await this.iotaClient.getDynamicFieldObjectV2({
-    //   parentObjectId: STABILITY_POOL_TABLE_ID,
-    //   name: {
-    //     type: "address",
-    //     value: accountAddr,
-    //   },
-    //   options: {
-    //     showContent: true,
-    //   },
-    // });
-    // const fields = getObjectFields(res);
-    return {
-      vusdBalance: "0",
-      collBalances: {
-        IOTA: "0",
-        stIOTA: "0",
+    const res = await this.iotaClient.getDynamicFieldObject({
+      parentId: STABILITY_POOL_TABLE_ID,
+      name: {
+        type: "address",
+        value: accountAddr,
       },
-    };
+    });
+    const fields = getObjectFields(res);
+    const collBalances: Partial<Record<COLLATERAL_COIN, string>> = {};
+    Object.keys(VAULT_MAP).map((collSymbol) => {
+      collBalances[collSymbol as COLLATERAL_COIN] = "0";
+    });
+    if (!fields) {
+      return { vusdBalance: "0", collBalances };
+    }
+
+    const vusdBalance =
+      fields.value.fields.value.fields.vusd_balance.fields.value;
+    const vecMap = fields.value.fields.value.fields.coll_balances.fields
+      .contents as any[];
+    vecMap.map((info) => {
+      const coinType = "0x" + info.fields.key.fields.name;
+      const coinSymbol = getCoinSymbol(coinType);
+      if (coinSymbol) {
+        const collBalance = info.fields.value.fields.value;
+        collBalances[coinSymbol as COLLATERAL_COIN] = collBalance;
+      }
+    });
+    return { vusdBalance, collBalances };
   }
 
   /* ----- Transaction Utils ----- */

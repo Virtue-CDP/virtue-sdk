@@ -221,6 +221,15 @@ import {
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
 import { isValidIotaAddress } from "@iota/iota-sdk/utils";
+var getCoinSymbol2 = (coinType) => {
+  const coin = Object.keys(COIN_TYPES).find(
+    (key) => COIN_TYPES[key] === coinType
+  );
+  if (coin) {
+    return coin;
+  }
+  return void 0;
+};
 var VirtueClient = class {
   constructor(inputs) {
     const { rpcUrl, sender } = inputs;
@@ -361,13 +370,32 @@ var VirtueClient = class {
     if (!isValidIotaAddress(accountAddr)) {
       throw new Error("Invalid account address");
     }
-    return {
-      vusdBalance: "0",
-      collBalances: {
-        IOTA: "0",
-        stIOTA: "0"
+    const res = await this.iotaClient.getDynamicFieldObject({
+      parentId: STABILITY_POOL_TABLE_ID,
+      name: {
+        type: "address",
+        value: accountAddr
       }
-    };
+    });
+    const fields = getObjectFields(res);
+    const collBalances = {};
+    Object.keys(VAULT_MAP).map((collSymbol) => {
+      collBalances[collSymbol] = "0";
+    });
+    if (!fields) {
+      return { vusdBalance: "0", collBalances };
+    }
+    const vusdBalance = fields.value.fields.value.fields.vusd_balance.fields.value;
+    const vecMap = fields.value.fields.value.fields.coll_balances.fields.contents;
+    vecMap.map((info) => {
+      const coinType = "0x" + info.fields.key.fields.name;
+      const coinSymbol = getCoinSymbol2(coinType);
+      if (coinSymbol) {
+        const collBalance = info.fields.value.fields.value;
+        collBalances[coinSymbol] = collBalance;
+      }
+    });
+    return { vusdBalance, collBalances };
   }
   /* ----- Transaction Utils ----- */
   /**

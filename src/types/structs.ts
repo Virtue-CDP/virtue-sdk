@@ -19,7 +19,7 @@ export type PositionInfo = {
 
 export type StabilityPoolBalances = {
   vusdBalance: string;
-  collBalances: Record<COLLATERAL_COIN, string>;
+  collBalances: Partial<Record<COLLATERAL_COIN, string>>;
 };
 
 export type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;
