@@ -10,8 +10,8 @@ export const ORIGINAL_ORACLE_PACKAGE_ID =
   "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 export const ORIGINAL_CDP_PACKAGE_ID =
   "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1";
-// export const ORIGINAL_LIQUIDATION_PACKAGE_ID =
-//   "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
+export const ORIGINAL_STABILITY_POOL_PACKAGE_ID =
+  "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
 
 /// Latest Package IDs
 
@@ -23,8 +23,8 @@ export const ORACLE_PACKAGE_ID =
   "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 export const CDP_PACKAGE_ID =
   "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22 ";
-// export const LIQUIDATION_PACKAGE_ID =
-//   "0x3b79a39a58128d94bbf2021e36b31485898851909c8167ab0df10fb2824a0f83";
+export const STABILITY_POOL_PACKAGE_ID =
+  "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
 
 /// Shared Objects
 
@@ -116,9 +116,11 @@ export const CERT_METADATA_OBJ: SharedObjectRef = {
   mutable: false,
 };
 
-// export const STABILITY_POOL_OBJ: SharedObjectRef = {
-//   objectId:
-//     "0x963b3d757dcd5ad14773a503eb481143b64d3686aebdf6a90443d908582188e0",
-//   initialSharedVersion: 252695564,
-//   mutable: true,
-// };
+export const STABILITY_POOL_OBJ: SharedObjectRef = {
+  objectId:
+    "0x6101272394511caf38ce5a6d120d3b4d009b6efabae8faac43aa9ac938cec558",
+  initialSharedVersion: 22329903,
+  mutable: true,
+};
+export const STABILITY_POOL_TABLE_ID =
+  "0x6dd808c50bab98757f7523562bdef7d33d506bb447ea9e708072bf13a5e29f02";

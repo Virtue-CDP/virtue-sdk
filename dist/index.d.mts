@@ -1,4 +1,4 @@
-import { TransactionResult, Transaction, TransactionArgument } from '@iota/iota-sdk/transactions';
+import { Transaction, TransactionResult, TransactionArgument } from '@iota/iota-sdk/transactions';
 import { IotaClient, IotaObjectData, IotaParsedData, IotaObjectResponse, IotaMoveObject } from '@iota/iota-sdk/client';
 import { IotaPriceServiceConnection, IotaPythClient } from '@pythnetwork/pyth-iota-js';
 import * as superstruct from 'superstruct';
@@ -56,8 +56,8 @@ type PositionInfo = {
     debtAmount: string;
 };
 type StabilityPoolBalances = {
-    vusdBalance: number;
-    collBalances: Record<COLLATERAL_COIN, number>;
+    vusdBalance: string;
+    collBalances: Record<COLLATERAL_COIN, string>;
 };
 type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;
 type StabilityPoolInfo = {
@@ -74,7 +74,7 @@ declare class VirtueClient {
     private iotaClient;
     private pythConnection;
     private pythClient;
-    private transaction;
+    transaction: Transaction;
     sender: string;
     constructor(inputs: {
         rpcUrl?: string;
@@ -123,6 +123,12 @@ declare class VirtueClient {
      * @returns Transaction
      */
     getTransaction(): Transaction;
+    /**
+     * @description Create a AccountRequest
+     * @param accountObj (optional): Account object or EOA if undefined
+     * @return [AccountRequest]
+     */
+    newAccountRequest(accountObj?: string | TransactionArgument): TransactionResult;
     /**
      * @description Create a price collector
      * @param collateral coin symbol, e.g "IOTA"
@@ -177,17 +183,37 @@ declare class VirtueClient {
     /**
      * @description deposit to stability pool
      * @param vusdCoin: coin of VUSD
+     * @param recipient (optional): deposit for recipient instead of sender
+     * @returns [PositionResponse]
      */
     depositStabilityPool(inputs: {
         vusdCoin: TransactionArgument;
-    }): void;
+        recipient?: string;
+    }): TransactionResult;
     /**
      * @description withdraw from stability pool
      * @param amount: how much amount to withdraw
+     * @param accountRequest: AccountRequest see this.accountRequest()
+     * @param amount: how much amount to withdraw
+     * @returns [Coin<VUSD>, PositionResponse]
      */
     withdrawStabilityPool(inputs: {
         amount: string;
+        accountRequest?: TransactionArgument;
+        accountObj?: string | TransactionArgument;
     }): TransactionResult;
+    /**
+     * @description claim from stability pool
+     */
+    claimStabilityPool(inputs: {
+        accountRequest?: TransactionArgument;
+        accountObj?: string | TransactionArgument;
+    }): TransactionArgument[];
+    /**
+     * @description check response for stability pool
+     * @param response: PositionResponse
+     */
+    checkResponseForStabilityPool(response: TransactionArgument): void;
     /**
      * @description build and return Transaction of manage position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
@@ -215,6 +241,7 @@ declare class VirtueClient {
      */
     buildDepositStabilityPoolTransaction(inputs: {
         depositAmount: string;
+        recipient?: string;
     }): Promise<Transaction>;
     /**
      * @description build and return Transaction of withdraw stability pool
@@ -223,6 +250,15 @@ declare class VirtueClient {
      */
     buildWithdrawStabilityPoolTransaction(inputs: {
         withdrawAmount: string;
+        accountObj?: string;
+    }): Promise<Transaction>;
+    /**
+     * @description build and return Transaction of withdraw stability pool
+     * @param withdrawAmount: how much amount to withdraw (collateral)
+     * @returns Transaction
+     */
+    buildClaimStabilityPoolTransaction(inputs: {
+        accountObj?: string;
     }): Promise<Transaction>;
 }
 
@@ -254,10 +290,12 @@ declare const ORIGINAL_FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd11
 declare const ORIGINAL_VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
 declare const ORIGINAL_ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 declare const ORIGINAL_CDP_PACKAGE_ID = "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1";
+declare const ORIGINAL_STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
 declare const FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
 declare const VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
 declare const ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 declare const CDP_PACKAGE_ID = "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22 ";
+declare const STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
 declare const CLOCK_OBJ: SharedObjectRef;
 declare const TREASURY_OBJ: SharedObjectRef;
 type SharedObjectRef = {
@@ -278,5 +316,7 @@ declare const PYTH_RULE_CONFIG_OBJ: SharedObjectRef;
 declare const CERT_RULE_PACKAGE_ID = "0x01edb9afe0663b8762d2e0a18923df8bee98d28f3a60ac56ff67a27bbf53a7ac";
 declare const CERT_NATIVE_POOL_OBJ: SharedObjectRef;
 declare const CERT_METADATA_OBJ: SharedObjectRef;
+declare const STABILITY_POOL_OBJ: SharedObjectRef;
+declare const STABILITY_POOL_TABLE_ID = "0x6dd808c50bab98757f7523562bdef7d33d506bb447ea9e708072bf13a5e29f02";
 
-export { CDP_PACKAGE_ID, CERT_METADATA_OBJ, CERT_NATIVE_POOL_OBJ, CERT_RULE_PACKAGE_ID, CLOCK_OBJ, type COIN, COIN_DECIMALS, COIN_TYPES, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CERT_METADATA_OBJ, CERT_NATIVE_POOL_OBJ, CERT_RULE_PACKAGE_ID, CLOCK_OBJ, type COIN, COIN_DECIMALS, COIN_TYPES, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_STABILITY_POOL_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, STABILITY_POOL_OBJ, STABILITY_POOL_PACKAGE_ID, STABILITY_POOL_TABLE_ID, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };

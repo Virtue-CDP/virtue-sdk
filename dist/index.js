@@ -21,10 +21,12 @@ var ORIGINAL_FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd1171f9085556
 var ORIGINAL_VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
 var ORIGINAL_ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 var ORIGINAL_CDP_PACKAGE_ID = "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1";
+var ORIGINAL_STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
 var FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
 var VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
 var ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 var CDP_PACKAGE_ID = "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22 ";
+var STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
 var CLOCK_OBJ = {
   objectId: "0x0000000000000000000000000000000000000000000000000000000000000006",
   mutable: false,
@@ -81,6 +83,12 @@ var CERT_METADATA_OBJ = {
   initialSharedVersion: 19,
   mutable: false
 };
+var STABILITY_POOL_OBJ = {
+  objectId: "0x6101272394511caf38ce5a6d120d3b4d009b6efabae8faac43aa9ac938cec558",
+  initialSharedVersion: 22329903,
+  mutable: true
+};
+var STABILITY_POOL_TABLE_ID = "0x6dd808c50bab98757f7523562bdef7d33d506bb447ea9e708072bf13a5e29f02";
 
 // src/utils/format.ts
 var _utils = require('@iota/iota-sdk/utils');
@@ -336,7 +344,17 @@ var VirtueClient = class {
     });
   }
   async getStabilityPool() {
-    return { vusdBalance: 0 };
+    const res = await this.iotaClient.getObject({
+      id: STABILITY_POOL_OBJ.objectId,
+      options: {
+        showContent: true
+      }
+    });
+    const fields = getObjectFields(res);
+    if (!fields) {
+      return { vusdBalance: 0 };
+    }
+    return { vusdBalance: fields.vusd_balance };
   }
   async getStabilityPoolBalances(account) {
     const accountAddr = _nullishCoalesce(account, () => ( this.sender));
@@ -344,10 +362,10 @@ var VirtueClient = class {
       throw new Error("Invalid account address");
     }
     return {
-      vusdBalance: 0,
+      vusdBalance: "0",
       collBalances: {
-        IOTA: 0,
-        stIOTA: 0
+        IOTA: "0",
+        stIOTA: "0"
       }
     };
   }
@@ -415,6 +433,21 @@ var VirtueClient = class {
    */
   getTransaction() {
     return this.transaction;
+  }
+  /**
+   * @description Create a AccountRequest
+   * @param accountObj (optional): Account object or EOA if undefined
+   * @return [AccountRequest]
+   */
+  newAccountRequest(accountObj) {
+    return accountObj ? this.transaction.moveCall({
+      target: `${FRAMEWORK_PACKAGE_ID}::account::request_with_account`,
+      arguments: [
+        typeof accountObj === "string" ? this.transaction.object(accountObj) : accountObj
+      ]
+    }) : this.transaction.moveCall({
+      target: `${FRAMEWORK_PACKAGE_ID}::account::request`
+    });
   }
   /**
    * @description Create a price collector
@@ -509,14 +542,7 @@ var VirtueClient = class {
     } = inputs;
     const coinType = COIN_TYPES[collateralSymbol];
     const vaultId = VAULT_MAP[collateralSymbol].vault.objectId;
-    const [accountReq] = accountObj ? this.transaction.moveCall({
-      target: `${FRAMEWORK_PACKAGE_ID}::account::request_with_account`,
-      arguments: [
-        typeof accountObj === "string" ? this.transaction.object(accountObj) : accountObj
-      ]
-    }) : this.transaction.moveCall({
-      target: `${FRAMEWORK_PACKAGE_ID}::account::request`
-    });
+    const [accountReq] = this.newAccountRequest(accountObj);
     return this.transaction.moveCall({
       target: `${CDP_PACKAGE_ID}::request::debtor_request`,
       typeArguments: [coinType],
@@ -582,18 +608,73 @@ var VirtueClient = class {
   /**
    * @description deposit to stability pool
    * @param vusdCoin: coin of VUSD
+   * @param recipient (optional): deposit for recipient instead of sender
+   * @returns [PositionResponse]
    */
   depositStabilityPool(inputs) {
-    const { vusdCoin } = inputs;
-    this.transaction.transferObjects([vusdCoin], this.sender);
+    const { vusdCoin, recipient } = inputs;
+    return this.transaction.moveCall({
+      target: `${STABILITY_POOL_PACKAGE_ID}::stability_pool::deposit`,
+      arguments: [
+        this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+        this.transaction.sharedObjectRef(CLOCK_OBJ),
+        this.transaction.pure.address(_nullishCoalesce(recipient, () => ( this.sender))),
+        vusdCoin
+      ]
+    });
   }
   /**
    * @description withdraw from stability pool
    * @param amount: how much amount to withdraw
+   * @param accountRequest: AccountRequest see this.accountRequest()
+   * @param amount: how much amount to withdraw
+   * @returns [Coin<VUSD>, PositionResponse]
    */
   withdrawStabilityPool(inputs) {
-    const { amount } = inputs;
-    return [this.transaction.pure.u64(amount)];
+    const { amount, accountRequest, accountObj } = inputs;
+    const [accountReq] = accountRequest ? [accountRequest] : this.newAccountRequest(accountObj);
+    return this.transaction.moveCall({
+      target: `${STABILITY_POOL_PACKAGE_ID}::stability_pool::withdraw`,
+      arguments: [
+        this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+        this.transaction.sharedObjectRef(CLOCK_OBJ),
+        accountReq,
+        this.transaction.pure.u64(amount)
+      ]
+    });
+  }
+  /**
+   * @description claim from stability pool
+   */
+  claimStabilityPool(inputs) {
+    const { accountRequest, accountObj } = inputs;
+    const [accountReq] = accountRequest ? [accountRequest] : this.newAccountRequest(accountObj);
+    const collCoins = Object.keys(VAULT_MAP).map((collSymbol) => {
+      const collType = COIN_TYPES[collSymbol];
+      const [collCoin] = this.transaction.moveCall({
+        target: `${STABILITY_POOL_OBJ}::stability_pool::claim`,
+        typeArguments: [collType],
+        arguments: [
+          this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+          accountReq
+        ]
+      });
+      return collCoin;
+    });
+    return collCoins;
+  }
+  /**
+   * @description check response for stability pool
+   * @param response: PositionResponse
+   */
+  checkResponseForStabilityPool(response) {
+    this.transaction.moveCall({
+      target: `${STABILITY_POOL_PACKAGE_ID}::stability_pool::check_response`,
+      arguments: [
+        this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+        response
+      ]
+    });
   }
   /* ----- Transaction Methods ----- */
   /**
@@ -673,9 +754,9 @@ var VirtueClient = class {
    */
   async buildDepositStabilityPoolTransaction(inputs) {
     this.resetTransaction();
-    const { depositAmount } = inputs;
+    const { depositAmount, recipient } = inputs;
     const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
-    this.depositStabilityPool({ vusdCoin });
+    this.depositStabilityPool({ vusdCoin, recipient });
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
@@ -687,8 +768,21 @@ var VirtueClient = class {
    */
   async buildWithdrawStabilityPoolTransaction(inputs) {
     this.resetTransaction();
-    const { withdrawAmount: amount } = inputs;
-    this.withdrawStabilityPool({ amount });
+    const { withdrawAmount: amount, accountObj } = inputs;
+    this.withdrawStabilityPool({ amount, accountObj });
+    const tx = this.getTransaction();
+    this.resetTransaction();
+    return tx;
+  }
+  /**
+   * @description build and return Transaction of withdraw stability pool
+   * @param withdrawAmount: how much amount to withdraw (collateral)
+   * @returns Transaction
+   */
+  async buildClaimStabilityPoolTransaction(inputs) {
+    this.resetTransaction();
+    const collCoins = this.claimStabilityPool(inputs);
+    this.transaction.transferObjects(collCoins, this.sender);
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
@@ -730,5 +824,9 @@ var VirtueClient = class {
 
 
 
-exports.CDP_PACKAGE_ID = CDP_PACKAGE_ID; exports.CERT_METADATA_OBJ = CERT_METADATA_OBJ; exports.CERT_NATIVE_POOL_OBJ = CERT_NATIVE_POOL_OBJ; exports.CERT_RULE_PACKAGE_ID = CERT_RULE_PACKAGE_ID; exports.CLOCK_OBJ = CLOCK_OBJ; exports.COIN_DECIMALS = COIN_DECIMALS; exports.COIN_TYPES = COIN_TYPES; exports.FRAMEWORK_PACKAGE_ID = FRAMEWORK_PACKAGE_ID; exports.ORACLE_PACKAGE_ID = ORACLE_PACKAGE_ID; exports.ORIGINAL_CDP_PACKAGE_ID = ORIGINAL_CDP_PACKAGE_ID; exports.ORIGINAL_FRAMEWORK_PACKAGE_ID = ORIGINAL_FRAMEWORK_PACKAGE_ID; exports.ORIGINAL_ORACLE_PACKAGE_ID = ORIGINAL_ORACLE_PACKAGE_ID; exports.ORIGINAL_VUSD_PACKAGE_ID = ORIGINAL_VUSD_PACKAGE_ID; exports.ObjectContentFields = ObjectContentFields; exports.PYTH_RULE_CONFIG_OBJ = PYTH_RULE_CONFIG_OBJ; exports.PYTH_RULE_PACKAGE_ID = PYTH_RULE_PACKAGE_ID; exports.PYTH_STATE_ID = PYTH_STATE_ID; exports.TREASURY_OBJ = TREASURY_OBJ; exports.U64FromBytes = U64FromBytes; exports.VAULT_MAP = VAULT_MAP; exports.VUSD_PACKAGE_ID = VUSD_PACKAGE_ID; exports.VirtueClient = VirtueClient; exports.WORMHOLE_STATE_ID = WORMHOLE_STATE_ID; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.getPriceResultType = getPriceResultType; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
+
+
+
+
+exports.CDP_PACKAGE_ID = CDP_PACKAGE_ID; exports.CERT_METADATA_OBJ = CERT_METADATA_OBJ; exports.CERT_NATIVE_POOL_OBJ = CERT_NATIVE_POOL_OBJ; exports.CERT_RULE_PACKAGE_ID = CERT_RULE_PACKAGE_ID; exports.CLOCK_OBJ = CLOCK_OBJ; exports.COIN_DECIMALS = COIN_DECIMALS; exports.COIN_TYPES = COIN_TYPES; exports.FRAMEWORK_PACKAGE_ID = FRAMEWORK_PACKAGE_ID; exports.ORACLE_PACKAGE_ID = ORACLE_PACKAGE_ID; exports.ORIGINAL_CDP_PACKAGE_ID = ORIGINAL_CDP_PACKAGE_ID; exports.ORIGINAL_FRAMEWORK_PACKAGE_ID = ORIGINAL_FRAMEWORK_PACKAGE_ID; exports.ORIGINAL_ORACLE_PACKAGE_ID = ORIGINAL_ORACLE_PACKAGE_ID; exports.ORIGINAL_STABILITY_POOL_PACKAGE_ID = ORIGINAL_STABILITY_POOL_PACKAGE_ID; exports.ORIGINAL_VUSD_PACKAGE_ID = ORIGINAL_VUSD_PACKAGE_ID; exports.ObjectContentFields = ObjectContentFields; exports.PYTH_RULE_CONFIG_OBJ = PYTH_RULE_CONFIG_OBJ; exports.PYTH_RULE_PACKAGE_ID = PYTH_RULE_PACKAGE_ID; exports.PYTH_STATE_ID = PYTH_STATE_ID; exports.STABILITY_POOL_OBJ = STABILITY_POOL_OBJ; exports.STABILITY_POOL_PACKAGE_ID = STABILITY_POOL_PACKAGE_ID; exports.STABILITY_POOL_TABLE_ID = STABILITY_POOL_TABLE_ID; exports.TREASURY_OBJ = TREASURY_OBJ; exports.U64FromBytes = U64FromBytes; exports.VAULT_MAP = VAULT_MAP; exports.VUSD_PACKAGE_ID = VUSD_PACKAGE_ID; exports.VirtueClient = VirtueClient; exports.WORMHOLE_STATE_ID = WORMHOLE_STATE_ID; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.getPriceResultType = getPriceResultType; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
 //# sourceMappingURL=index.js.map

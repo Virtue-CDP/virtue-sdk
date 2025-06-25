@@ -17,6 +17,9 @@ import {
   PYTH_RULE_CONFIG_OBJ,
   PYTH_RULE_PACKAGE_ID,
   PYTH_STATE_ID,
+  STABILITY_POOL_OBJ,
+  STABILITY_POOL_PACKAGE_ID,
+  // STABILITY_POOL_TABLE_ID,
   TREASURY_OBJ,
   VAULT_MAP,
   WORMHOLE_STATE_ID,
@@ -58,7 +61,7 @@ export class VirtueClient {
   private iotaClient: IotaClient;
   private pythConnection: IotaPriceServiceConnection;
   private pythClient: IotaPythClient;
-  private transaction: Transaction;
+  public transaction: Transaction;
   public sender: string;
 
   constructor(inputs: { rpcUrl?: string; sender: string }) {
@@ -206,8 +209,19 @@ export class VirtueClient {
   }
 
   async getStabilityPool(): Promise<StabilityPoolInfo> {
-    // TODO: fetch StabilityPool object
-    return { vusdBalance: 0 };
+    const res = await this.iotaClient.getObject({
+      id: STABILITY_POOL_OBJ.objectId,
+      options: {
+        showContent: true,
+      },
+    });
+    const fields = getObjectFields(res);
+
+    if (!fields) {
+      return { vusdBalance: 0 };
+    }
+
+    return { vusdBalance: fields.vusd_balance };
   }
 
   async getStabilityPoolBalances(
@@ -218,11 +232,22 @@ export class VirtueClient {
     if (!isValidIotaAddress(accountAddr)) {
       throw new Error("Invalid account address");
     }
+    // const res = await this.iotaClient.getDynamicFieldObjectV2({
+    //   parentObjectId: STABILITY_POOL_TABLE_ID,
+    //   name: {
+    //     type: "address",
+    //     value: accountAddr,
+    //   },
+    //   options: {
+    //     showContent: true,
+    //   },
+    // });
+    // const fields = getObjectFields(res);
     return {
-      vusdBalance: 0,
+      vusdBalance: "0",
       collBalances: {
-        IOTA: 0,
-        stIOTA: 0,
+        IOTA: "0",
+        stIOTA: "0",
       },
     };
   }
@@ -301,6 +326,28 @@ export class VirtueClient {
    */
   getTransaction(): Transaction {
     return this.transaction;
+  }
+
+  /**
+   * @description Create a AccountRequest
+   * @param accountObj (optional): Account object or EOA if undefined
+   * @return [AccountRequest]
+   */
+  newAccountRequest(
+    accountObj?: string | TransactionArgument,
+  ): TransactionResult {
+    return accountObj
+      ? this.transaction.moveCall({
+          target: `${FRAMEWORK_PACKAGE_ID}::account::request_with_account`,
+          arguments: [
+            typeof accountObj === "string"
+              ? this.transaction.object(accountObj)
+              : accountObj,
+          ],
+        })
+      : this.transaction.moveCall({
+          target: `${FRAMEWORK_PACKAGE_ID}::account::request`,
+        });
   }
 
   /**
@@ -407,18 +454,7 @@ export class VirtueClient {
     } = inputs;
     const coinType = COIN_TYPES[collateralSymbol];
     const vaultId = VAULT_MAP[collateralSymbol].vault.objectId;
-    const [accountReq] = accountObj
-      ? this.transaction.moveCall({
-          target: `${FRAMEWORK_PACKAGE_ID}::account::request_with_account`,
-          arguments: [
-            typeof accountObj === "string"
-              ? this.transaction.object(accountObj)
-              : accountObj,
-          ],
-        })
-      : this.transaction.moveCall({
-          target: `${FRAMEWORK_PACKAGE_ID}::account::request`,
-        });
+    const [accountReq] = this.newAccountRequest(accountObj);
     return this.transaction.moveCall({
       target: `${CDP_PACKAGE_ID}::request::debtor_request`,
       typeArguments: [coinType],
@@ -480,7 +516,6 @@ export class VirtueClient {
     collateralSymbol: COLLATERAL_COIN;
     response: TransactionArgument;
   }) {
-    // TODO: PTB of deposit SP
     const { collateralSymbol, response } = inputs;
     const vault = VAULT_MAP[collateralSymbol].vault;
     this.transaction.moveCall({
@@ -497,21 +532,90 @@ export class VirtueClient {
   /**
    * @description deposit to stability pool
    * @param vusdCoin: coin of VUSD
+   * @param recipient (optional): deposit for recipient instead of sender
+   * @returns [PositionResponse]
    */
-  depositStabilityPool(inputs: { vusdCoin: TransactionArgument }) {
-    // TODO: PTB of deposit SP
-    const { vusdCoin } = inputs;
-    this.transaction.transferObjects([vusdCoin], this.sender);
+  depositStabilityPool(inputs: {
+    vusdCoin: TransactionArgument;
+    recipient?: string;
+  }): TransactionResult {
+    const { vusdCoin, recipient } = inputs;
+    return this.transaction.moveCall({
+      target: `${STABILITY_POOL_PACKAGE_ID}::stability_pool::deposit`,
+      arguments: [
+        this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+        this.transaction.sharedObjectRef(CLOCK_OBJ),
+        this.transaction.pure.address(recipient ?? this.sender),
+        vusdCoin,
+      ],
+    });
   }
 
   /**
    * @description withdraw from stability pool
    * @param amount: how much amount to withdraw
+   * @param accountRequest: AccountRequest see this.accountRequest()
+   * @param amount: how much amount to withdraw
+   * @returns [Coin<VUSD>, PositionResponse]
    */
-  withdrawStabilityPool(inputs: { amount: string }): TransactionResult {
-    // TODO: PTB of withdraw SP
-    const { amount } = inputs;
-    return [this.transaction.pure.u64(amount)] as TransactionResult;
+  withdrawStabilityPool(inputs: {
+    amount: string;
+    accountRequest?: TransactionArgument;
+    accountObj?: string | TransactionArgument;
+  }): TransactionResult {
+    const { amount, accountRequest, accountObj } = inputs;
+    const [accountReq] = accountRequest
+      ? [accountRequest]
+      : this.newAccountRequest(accountObj);
+    return this.transaction.moveCall({
+      target: `${STABILITY_POOL_PACKAGE_ID}::stability_pool::withdraw`,
+      arguments: [
+        this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+        this.transaction.sharedObjectRef(CLOCK_OBJ),
+        accountReq,
+        this.transaction.pure.u64(amount),
+      ],
+    });
+  }
+
+  /**
+   * @description claim from stability pool
+   */
+  claimStabilityPool(inputs: {
+    accountRequest?: TransactionArgument;
+    accountObj?: string | TransactionArgument;
+  }): TransactionArgument[] {
+    const { accountRequest, accountObj } = inputs;
+    const [accountReq] = accountRequest
+      ? [accountRequest]
+      : this.newAccountRequest(accountObj);
+    const collCoins = Object.keys(VAULT_MAP).map((collSymbol) => {
+      const collType = COIN_TYPES[collSymbol as COLLATERAL_COIN];
+      const [collCoin] = this.transaction.moveCall({
+        target: `${STABILITY_POOL_OBJ}::stability_pool::claim`,
+        typeArguments: [collType],
+        arguments: [
+          this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+          accountReq,
+        ],
+      });
+      return collCoin;
+    });
+    return collCoins;
+  }
+
+  /**
+   * @description check response for stability pool
+   * @param response: PositionResponse
+   */
+  checkResponseForStabilityPool(response: TransactionArgument) {
+    this.transaction.moveCall({
+      target: `${STABILITY_POOL_PACKAGE_ID}::stability_pool::check_response`,
+      arguments: [
+        this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+        response,
+      ],
+    });
   }
 
   /* ----- Transaction Methods ----- */
@@ -605,11 +709,12 @@ export class VirtueClient {
    */
   async buildDepositStabilityPoolTransaction(inputs: {
     depositAmount: string;
+    recipient?: string;
   }): Promise<Transaction> {
     this.resetTransaction();
-    const { depositAmount } = inputs;
+    const { depositAmount, recipient } = inputs;
     const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
-    this.depositStabilityPool({ vusdCoin });
+    this.depositStabilityPool({ vusdCoin, recipient });
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
@@ -622,10 +727,27 @@ export class VirtueClient {
    */
   async buildWithdrawStabilityPoolTransaction(inputs: {
     withdrawAmount: string;
+    accountObj?: string;
   }): Promise<Transaction> {
     this.resetTransaction();
-    const { withdrawAmount: amount } = inputs;
-    this.withdrawStabilityPool({ amount });
+    const { withdrawAmount: amount, accountObj } = inputs;
+    this.withdrawStabilityPool({ amount, accountObj });
+    const tx = this.getTransaction();
+    this.resetTransaction();
+    return tx;
+  }
+
+  /**
+   * @description build and return Transaction of withdraw stability pool
+   * @param withdrawAmount: how much amount to withdraw (collateral)
+   * @returns Transaction
+   */
+  async buildClaimStabilityPoolTransaction(inputs: {
+    accountObj?: string;
+  }): Promise<Transaction> {
+    this.resetTransaction();
+    const collCoins = this.claimStabilityPool(inputs);
+    this.transaction.transferObjects(collCoins, this.sender);
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
