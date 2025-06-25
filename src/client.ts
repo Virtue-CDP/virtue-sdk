@@ -240,9 +240,9 @@ export class VirtueClient {
       },
     });
     const fields = getObjectFields(res);
-    const collBalances: Partial<Record<COLLATERAL_COIN, string>> = {};
+    const collBalances: Partial<Record<COLLATERAL_COIN, number>> = {};
     Object.keys(VAULT_MAP).map((collSymbol) => {
-      collBalances[collSymbol as COLLATERAL_COIN] = "0";
+      collBalances[collSymbol as COLLATERAL_COIN] = 0;
     });
     if (!fields) {
       return { vusdBalance: "0", collBalances };
@@ -257,7 +257,7 @@ export class VirtueClient {
       const coinSymbol = getCoinSymbol(coinType);
       if (coinSymbol) {
         const collBalance = info.fields.value.fields.value;
-        collBalances[coinSymbol as COLLATERAL_COIN] = collBalance;
+        collBalances[coinSymbol as COLLATERAL_COIN] = +collBalance;
       }
     });
     return { vusdBalance, collBalances };

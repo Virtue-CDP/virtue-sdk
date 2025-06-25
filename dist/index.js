@@ -380,7 +380,7 @@ var VirtueClient = class {
     const fields = getObjectFields(res);
     const collBalances = {};
     Object.keys(VAULT_MAP).map((collSymbol) => {
-      collBalances[collSymbol] = "0";
+      collBalances[collSymbol] = 0;
     });
     if (!fields) {
       return { vusdBalance: "0", collBalances };
@@ -392,7 +392,7 @@ var VirtueClient = class {
       const coinSymbol = getCoinSymbol2(coinType);
       if (coinSymbol) {
         const collBalance = info.fields.value.fields.value;
-        collBalances[coinSymbol] = collBalance;
+        collBalances[coinSymbol] = +collBalance;
       }
     });
     return { vusdBalance, collBalances };
