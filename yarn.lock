@@ -542,10 +542,10 @@
   dependencies:
     bs58 "^6.0.0"
 
-"@iota/bcs@1.0.0":
-  version "1.0.0"
-  resolved "https://registry.yarnpkg.com/@iota/bcs/-/bcs-1.0.0.tgz#68fc58339baf7754fda9993145c09090587cfbf3"
-  integrity sha512-oxXgpzlL0d2jbzZH/9XmLcM+jmPbYT1hbbPfkvzMZvGChIDw1zLvp1EFsJtb2hAcLHORIAHIV0xEhzhBpIlSqA==
+"@iota/bcs@1.1.0":
+  version "1.1.0"
+  resolved "https://registry.yarnpkg.com/@iota/bcs/-/bcs-1.1.0.tgz#bcd0d53c75cce6a62f27abac46a211d8497afbe4"
+  integrity sha512-KUDMbvLilv+AvGVjH9rktyBD2ttYFvx21qyiU5HHiJxX4duKngXjbb7XauICQrss5taz0YgPdK5RqIoHuwntYw==
   dependencies:
     bs58 "^6.0.0"
 
@@ -567,13 +567,13 @@
     tweetnacl "^1.0.3"
     valibot "^0.36.0"
 
-"@iota/iota-sdk@^1.2.0":
-  version "1.2.0"
-  resolved "https://registry.yarnpkg.com/@iota/iota-sdk/-/iota-sdk-1.2.0.tgz#aaf420338c80b0b227af0ed3cdb1c1bca42551da"
-  integrity sha512-SzC3NFYuq2P3dNh79X679p9Frb1XylU8O3nfeOQL4NcEnf/44k5HY0ABeNuWHFoYoeuI0Uk+qSIEcIVSaaMoag==
+"@iota/iota-sdk@^1.4.0":
+  version "1.4.0"
+  resolved "https://registry.yarnpkg.com/@iota/iota-sdk/-/iota-sdk-1.4.0.tgz#0529102a0f3ef2cd9df59680aab77e005a87c4c4"
+  integrity sha512-HcZEq1fJzkus7u+gA2l2/raxyr2736wi9iPw+KJUoieogPOG7p2qTg3HQIa4zJ+rJBuMZcxE7bLJG+TnWd3Q5w==
   dependencies:
     "@graphql-typed-document-node/core" "^3.2.0"
-    "@iota/bcs" "1.0.0"
+    "@iota/bcs" "1.1.0"
     "@noble/curves" "^1.4.2"
     "@noble/hashes" "^1.4.0"
     "@scure/bip32" "^1.4.0"
