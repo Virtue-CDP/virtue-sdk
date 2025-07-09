@@ -678,51 +678,79 @@ export class VirtueClient {
       depositAmount,
     );
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
-    const [priceResult] =
-      Number(borrowAmount) > 0 || Number(withdrawAmount) > 0
-        ? await this.aggregatePrice(collateralSymbol)
-        : [undefined];
-    const [updateRequest] = this.debtorRequest({
-      collateralSymbol,
-      depositCoin,
-      borrowAmount,
-      repaymentCoin,
-      withdrawAmount,
-      accountObj: accountObjId,
-    });
-    const [collCoin, vusdCoin, response] = this.updatePosition({
-      collateralSymbol,
-      updateRequest,
-      priceResult,
-    });
-    this.checkResponse({ collateralSymbol, response });
-    if (Number(withdrawAmount) > 0) {
-      this.transaction.transferObjects([collCoin], recipient ?? this.sender);
+    if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
+      const [priceResult] = await this.aggregatePrice(collateralSymbol);
+      const [updateRequest] = this.debtorRequest({
+        collateralSymbol,
+        depositCoin,
+        borrowAmount,
+        repaymentCoin,
+        withdrawAmount,
+        accountObj: accountObjId,
+      });
+      const [collCoin, vusdCoin, response] = this.updatePosition({
+        collateralSymbol,
+        updateRequest,
+        priceResult,
+      });
+      this.checkResponse({ collateralSymbol, response });
+      if (Number(withdrawAmount) > 0) {
+        this.transaction.transferObjects([collCoin], recipient ?? this.sender);
+      } else {
+        this.transaction.moveCall({
+          target: "0x2::coin::destroy_zero",
+          typeArguments: [coinType],
+          arguments: [collCoin],
+        });
+      }
+      if (Number(borrowAmount) > 0) {
+        if (recipient === "StabilityPool") {
+          const [response] = this.depositStabilityPool({ vusdCoin, recipient });
+          this.checkResponseForStabilityPool(response);
+        } else {
+          this.transaction.transferObjects(
+            [vusdCoin],
+            recipient ?? this.sender,
+          );
+        }
+      } else {
+        this.transaction.moveCall({
+          target: "0x2::coin::destroy_zero",
+          typeArguments: [COIN_TYPES.VUSD],
+          arguments: [vusdCoin],
+        });
+      }
+      const tx = this.getTransaction();
+      this.resetTransaction();
+      return tx;
     } else {
+      const [updateRequest] = this.debtorRequest({
+        collateralSymbol,
+        depositCoin,
+        borrowAmount,
+        repaymentCoin,
+        withdrawAmount,
+        accountObj: accountObjId,
+      });
+      const [collCoin, vusdCoin, response] = this.updatePosition({
+        collateralSymbol,
+        updateRequest,
+      });
+      this.checkResponse({ collateralSymbol, response });
       this.transaction.moveCall({
         target: "0x2::coin::destroy_zero",
         typeArguments: [coinType],
         arguments: [collCoin],
       });
-    }
-    if (Number(borrowAmount) > 0) {
-      if (recipient === "StabilityPool") {
-        const [response] = this.depositStabilityPool({ vusdCoin, recipient });
-        this.checkResponseForStabilityPool(response);
-      } else {
-        this.transaction.transferObjects([vusdCoin], recipient ?? this.sender);
-      }
-    } else {
       this.transaction.moveCall({
         target: "0x2::coin::destroy_zero",
         typeArguments: [COIN_TYPES.VUSD],
         arguments: [vusdCoin],
       });
+      const tx = this.getTransaction();
+      this.resetTransaction();
+      return tx;
     }
-    this.transaction.setSender(this.sender);
-    const tx = this.getTransaction();
-    this.resetTransaction();
-    return tx;
   }
 
   /**
