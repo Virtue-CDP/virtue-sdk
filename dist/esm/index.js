@@ -724,6 +724,8 @@ var VirtueClient = class {
    */
   async buildManagePositionTransaction(inputs) {
     this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const {
       collateralSymbol,
       depositAmount,
@@ -734,7 +736,6 @@ var VirtueClient = class {
       recipient
     } = inputs;
     const coinType = COIN_TYPES[collateralSymbol];
-    if (!this.sender) throw new Error("Sender is not set");
     const [depositCoin] = await this.splitInputCoins(
       collateralSymbol,
       depositAmount
@@ -778,6 +779,7 @@ var VirtueClient = class {
         arguments: [vusdCoin]
       });
     }
+    this.transaction.setSender(this.sender);
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
@@ -789,6 +791,8 @@ var VirtueClient = class {
    */
   async buildDepositStabilityPoolTransaction(inputs) {
     this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const { depositAmount, recipient } = inputs;
     const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
     const [response] = this.depositStabilityPool({ vusdCoin, recipient });
@@ -804,6 +808,8 @@ var VirtueClient = class {
    */
   async buildWithdrawStabilityPoolTransaction(inputs) {
     this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const { withdrawAmount: amount, accountObj } = inputs;
     const [vusdOut, response] = this.withdrawStabilityPool({
       amount,
@@ -822,6 +828,8 @@ var VirtueClient = class {
    */
   async buildClaimStabilityPoolTransaction(inputs) {
     this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const collCoins = this.claimStabilityPool(inputs);
     this.transaction.transferObjects(collCoins, this.sender);
     const tx = this.getTransaction();

@@ -661,6 +661,8 @@ export class VirtueClient {
     recipient?: string | "StabilityPool";
   }): Promise<Transaction> {
     this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const {
       collateralSymbol,
       depositAmount,
@@ -671,7 +673,6 @@ export class VirtueClient {
       recipient,
     } = inputs;
     const coinType = COIN_TYPES[collateralSymbol];
-    if (!this.sender) throw new Error("Sender is not set");
     const [depositCoin] = await this.splitInputCoins(
       collateralSymbol,
       depositAmount,
@@ -718,6 +719,7 @@ export class VirtueClient {
         arguments: [vusdCoin],
       });
     }
+    this.transaction.setSender(this.sender);
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
@@ -733,6 +735,8 @@ export class VirtueClient {
     recipient?: string;
   }): Promise<Transaction> {
     this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const { depositAmount, recipient } = inputs;
     const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
     const [response] = this.depositStabilityPool({ vusdCoin, recipient });
@@ -752,6 +756,8 @@ export class VirtueClient {
     accountObj?: string;
   }): Promise<Transaction> {
     this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const { withdrawAmount: amount, accountObj } = inputs;
     const [vusdOut, response] = this.withdrawStabilityPool({
       amount,
@@ -773,6 +779,8 @@ export class VirtueClient {
     accountObj?: string;
   }): Promise<Transaction> {
     this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const collCoins = this.claimStabilityPool(inputs);
     this.transaction.transferObjects(collCoins, this.sender);
     const tx = this.getTransaction();
