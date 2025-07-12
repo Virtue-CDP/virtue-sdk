@@ -421,7 +421,9 @@ var VirtueClient = class {
       if (coinSymbol === "IOTA") {
         return this.transaction.splitCoins(
           this.transaction.gas,
-          amounts.map((amount) => this.transaction.pure.u64(amount))
+          amounts.map(
+            (amount) => typeof amount === "string" ? this.transaction.pure.u64(amount) : amount
+          )
         );
       } else {
         const coinType = COIN_TYPES[coinSymbol];
@@ -445,7 +447,9 @@ var VirtueClient = class {
         }
         const out = this.transaction.splitCoins(
           mainCoin,
-          amounts.map((amount) => this.transaction.pure.u64(amount))
+          amounts.map(
+            (amount) => typeof amount === "string" ? this.transaction.pure.u64(amount) : amount
+          )
         );
         if (ifMerge) {
           this.transaction.transferObjects([mainCoin], this.sender);
@@ -585,9 +589,9 @@ var VirtueClient = class {
         this.transaction.sharedObjectRef(TREASURY_OBJ),
         this.transaction.pure.id(vaultId),
         depositCoin,
-        this.transaction.pure.u64(borrowAmount),
+        typeof borrowAmount === "string" ? this.transaction.pure.u64(borrowAmount) : borrowAmount,
         repaymentCoin,
-        this.transaction.pure.u64(withdrawAmount)
+        typeof withdrawAmount === "string" ? this.transaction.pure.u64(withdrawAmount) : withdrawAmount
       ]
     });
   }
@@ -814,6 +818,58 @@ var VirtueClient = class {
       this.resetTransaction();
       return tx;
     }
+  }
+  /**
+   * @description build and return Transaction of close position
+   * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
+   * @param accountObjId: the Account object to hold position (undefined if just use EOA)
+   * @param recipient (optional): the recipient of the output coins
+   * @returns Transaction
+   */
+  async buildClosePositionTransaction(inputs) {
+    this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
+    const { collateralSymbol, accountObjId, recipient } = inputs;
+    const collType = COIN_TYPES[collateralSymbol];
+    const vaultObj = VAULT_MAP[collateralSymbol].vault;
+    const [collAmount, debtAmount] = this.transaction.moveCall({
+      target: `${CDP_PACKAGE_ID}::vault::get_position_data`,
+      typeArguments: [collType],
+      arguments: [
+        this.transaction.sharedObjectRef(vaultObj),
+        this.transaction.pure.address(this.sender),
+        this.transaction.sharedObjectRef(CLOCK_OBJ)
+      ]
+    });
+    const repaymentCoin = await this.splitInputCoins("VUSD", debtAmount);
+    const [priceResult] = await this.aggregatePrice(collateralSymbol);
+    const [updateRequest] = this.debtorRequest({
+      collateralSymbol,
+      depositCoin: this.zeroCoin(collateralSymbol),
+      borrowAmount: "0",
+      repaymentCoin,
+      withdrawAmount: collAmount,
+      accountObj: accountObjId
+    });
+    const [collCoin, vusdCoin, response] = this.updatePosition({
+      collateralSymbol,
+      updateRequest,
+      priceResult
+    });
+    this.checkResponse({ collateralSymbol, response });
+    this.transaction.moveCall({
+      target: "0x2::coin::destroy_zero",
+      typeArguments: [COIN_TYPES.VUSD],
+      arguments: [vusdCoin]
+    });
+    this.transaction.transferObjects(
+      [collCoin],
+      recipient ?? this.transaction.pure.address(this.sender)
+    );
+    const tx = this.getTransaction();
+    this.resetTransaction();
+    return tx;
   }
   /**
    * @description build and return Transaction of deposit stability pool

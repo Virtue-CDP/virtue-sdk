@@ -113,7 +113,7 @@ declare class VirtueClient {
     /**
      * @description split the needed coins
      */
-    splitInputCoins(coinSymbol: COIN, ...amounts: string[]): Promise<TransactionResult>;
+    splitInputCoins(coinSymbol: COIN, ...amounts: (string | TransactionArgument)[]): Promise<TransactionResult>;
     /**
      * @description Reset this.transaction
      */
@@ -154,9 +154,9 @@ declare class VirtueClient {
     debtorRequest(inputs: {
         collateralSymbol: COLLATERAL_COIN;
         depositCoin: TransactionArgument;
-        borrowAmount: string;
+        borrowAmount: string | TransactionArgument;
         repaymentCoin: TransactionArgument;
-        withdrawAmount: string;
+        withdrawAmount: string | TransactionArgument;
         accountObj?: string | TransactionArgument;
     }): TransactionResult;
     /**
@@ -232,7 +232,19 @@ declare class VirtueClient {
         repaymentAmount: string;
         withdrawAmount: string;
         accountObjId?: string;
-        recipient?: string | "StabilityPool";
+        recipient?: string;
+    }): Promise<Transaction>;
+    /**
+     * @description build and return Transaction of close position
+     * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
+     * @param accountObjId: the Account object to hold position (undefined if just use EOA)
+     * @param recipient (optional): the recipient of the output coins
+     * @returns Transaction
+     */
+    buildClosePositionTransaction(inputs: {
+        collateralSymbol: COLLATERAL_COIN;
+        accountObjId?: string;
+        recipient?: string;
     }): Promise<Transaction>;
     /**
      * @description build and return Transaction of deposit stability pool
