@@ -793,7 +793,6 @@ export class VirtueClient {
       ],
     });
     const repaymentCoin = await this.splitInputCoins("VUSD", debtAmount);
-    const [priceResult] = await this.aggregatePrice(collateralSymbol);
     const [updateRequest] = this.debtorRequest({
       collateralSymbol,
       depositCoin: this.zeroCoin(collateralSymbol),
@@ -805,7 +804,6 @@ export class VirtueClient {
     const [collCoin, vusdCoin, response] = this.updatePosition({
       collateralSymbol,
       updateRequest,
-      priceResult,
     });
     this.checkResponse({ collateralSymbol, response });
     this.transaction.moveCall({
