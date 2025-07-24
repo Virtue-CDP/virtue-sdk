@@ -36,6 +36,7 @@ import {
   COIN,
   StabilityPoolInfo,
   StabilityPoolBalances,
+  Rewards,
 } from "@/types";
 import { getObjectFields, getPriceResultType, parseVaultObject } from "@/utils";
 import {
@@ -264,6 +265,45 @@ export class VirtueClient {
       }
     });
     return { vusdBalance, collBalances };
+  }
+
+  async getBorrowRewards(
+    collateralSymbol: COLLATERAL_COIN,
+    account?: string,
+  ): Promise<Rewards> {
+    const tx = new Transaction();
+    const accountAddr = account ?? this.sender;
+    if (!isValidIotaAddress(accountAddr)) {
+      throw new Error("Invalid debtor address");
+    }
+    const rewarders = VAULT_MAP[collateralSymbol].rewarders;
+    if (!rewarders) return {};
+    rewarders.map((rewarder) => {
+      tx.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::realtime_reward_amount`,
+        typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+        arguments: [
+          tx.sharedObjectRef(rewarder),
+          tx.pure.address(accountAddr),
+          tx.sharedObjectRef(CLOCK_OBJ),
+        ],
+      });
+    });
+    const res = await this.iotaClient.devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: accountAddr,
+    });
+    if (!res.results) return {};
+
+    const rewards: Rewards = {};
+    res.results.map((value, idx) => {
+      const rewarder = rewarders[idx];
+      if (value.returnValues) {
+        const [rewardAmount] = value.returnValues;
+        rewards[rewarder.rewardSymbol] = Number(rewardAmount);
+      }
+    });
+    return rewards;
   }
 
   /* ----- Transaction Utils ----- */

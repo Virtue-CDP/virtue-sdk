@@ -63,6 +63,7 @@ type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;
 type StabilityPoolInfo = {
     vusdBalance: number;
 };
+type Rewards = Partial<Record<COIN, number>>;
 
 declare class VirtueClient {
     /**
@@ -106,6 +107,7 @@ declare class VirtueClient {
     getDebtorPositions(debtor?: string): Promise<PositionInfo[]>;
     getStabilityPool(): Promise<StabilityPoolInfo>;
     getStabilityPoolBalances(account?: string): Promise<StabilityPoolBalances>;
+    getBorrowRewards(collateralSymbol: COLLATERAL_COIN, account?: string): Promise<Rewards>;
     /**
      * @description new zero coin
      */
@@ -342,4 +344,4 @@ declare const STABILITY_POOL_TABLE_ID = "0x6dd808c50bab98757f7523562bdef7d33d506
 declare const VAULT_REWARDER_REGISTRY_OBJ: SharedObjectRef;
 declare const INCENTIVE_GLOBAL_CONFIG_OBJ: SharedObjectRef;
 
-export { CDP_PACKAGE_ID, CERT_METADATA_OBJ, CERT_NATIVE_POOL_OBJ, CERT_RULE_PACKAGE_ID, CLOCK_OBJ, type COIN, COIN_DECIMALS, COIN_TYPES, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, INCENTIVE_GLOBAL_CONFIG_OBJ, INCENTIVE_PACKAGE_ID, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_INCENTIVE_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_STABILITY_POOL_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type RewarderInfo, STABILITY_POOL_OBJ, STABILITY_POOL_PACKAGE_ID, STABILITY_POOL_TABLE_ID, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VAULT_REWARDER_REGISTRY_OBJ, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CERT_METADATA_OBJ, CERT_NATIVE_POOL_OBJ, CERT_RULE_PACKAGE_ID, CLOCK_OBJ, type COIN, COIN_DECIMALS, COIN_TYPES, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, INCENTIVE_GLOBAL_CONFIG_OBJ, INCENTIVE_PACKAGE_ID, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_INCENTIVE_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_STABILITY_POOL_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type RewarderInfo, type Rewards, STABILITY_POOL_OBJ, STABILITY_POOL_PACKAGE_ID, STABILITY_POOL_TABLE_ID, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VAULT_REWARDER_REGISTRY_OBJ, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };

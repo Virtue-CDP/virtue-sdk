@@ -417,6 +417,40 @@ var VirtueClient = class {
     });
     return { vusdBalance, collBalances };
   }
+  async getBorrowRewards(collateralSymbol, account) {
+    const tx = new (0, _transactions.Transaction)();
+    const accountAddr = _nullishCoalesce(account, () => ( this.sender));
+    if (!_utils.isValidIotaAddress.call(void 0, accountAddr)) {
+      throw new Error("Invalid debtor address");
+    }
+    const rewarders = VAULT_MAP[collateralSymbol].rewarders;
+    if (!rewarders) return {};
+    rewarders.map((rewarder) => {
+      tx.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::realtime_reward_amount`,
+        typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+        arguments: [
+          tx.sharedObjectRef(rewarder),
+          tx.pure.address(accountAddr),
+          tx.sharedObjectRef(CLOCK_OBJ)
+        ]
+      });
+    });
+    const res = await this.iotaClient.devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: accountAddr
+    });
+    if (!res.results) return {};
+    const rewards = {};
+    res.results.map((value, idx) => {
+      const rewarder = rewarders[idx];
+      if (value.returnValues) {
+        const [rewardAmount] = value.returnValues;
+        rewards[rewarder.rewardSymbol] = Number(rewardAmount);
+      }
+    });
+    return rewards;
+  }
   /* ----- Transaction Utils ----- */
   /**
    * @description new zero coin

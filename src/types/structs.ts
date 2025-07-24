@@ -1,4 +1,4 @@
-import { COLLATERAL_COIN } from "./coin";
+import { COIN, COLLATERAL_COIN } from "./coin";
 
 export type VaultInfo = {
   token: COLLATERAL_COIN;
@@ -27,3 +27,5 @@ export type VaultInfoList = Partial<Record<COLLATERAL_COIN, VaultInfo>>;
 export type StabilityPoolInfo = {
   vusdBalance: number;
 };
+
+export type Rewards = Partial<Record<COIN, number>>;
