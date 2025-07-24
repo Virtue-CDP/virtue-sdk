@@ -28,7 +28,7 @@ export const CDP_PACKAGE_ID =
 export const STABILITY_POOL_PACKAGE_ID =
   "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
 export const INCENTIVE_PACKAGE_ID =
-  "0xdbe8b5f6aa4da27c8f98a42079ce158220fbb57c88a2b2b703604b133cec1308";
+  "0x728ba0d8cc3ac19814442f4f626f463ebd1a0b9492c5ad756d717bff72dda1de";
 
 /// Shared Objects
 
