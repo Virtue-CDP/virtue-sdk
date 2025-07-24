@@ -964,4 +964,40 @@ export class VirtueClient {
     this.resetTransaction();
     return tx;
   }
+
+  /**
+   * @description claim from stability pool
+   */
+  buildClaimBorrowRewards(inputs: {
+    accountObj?: string | TransactionArgument;
+  }): Transaction {
+    this.resetTransaction();
+    const { accountObj } = inputs;
+    const [accountReq] = this.newAccountRequest(accountObj);
+    const globalConfigObj = this.transaction.sharedObjectRef(
+      INCENTIVE_GLOBAL_CONFIG_OBJ,
+    );
+    const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
+    Object.keys(VAULT_MAP).map((collSymbol) => {
+      const rewarders = VAULT_MAP[collSymbol as COLLATERAL_COIN].rewarders;
+      if (rewarders) {
+        rewarders.map((rewarder) => {
+          const [reward] = this.transaction.moveCall({
+            target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::claim`,
+            typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+            arguments: [
+              this.transaction.sharedObjectRef(rewarder),
+              globalConfigObj,
+              accountReq,
+              clockObj,
+            ],
+          });
+          this.transaction.transferObjects([reward], this.sender);
+        });
+      }
+    });
+    const tx = this.getTransaction();
+    this.resetTransaction();
+    return tx;
+  }
 }

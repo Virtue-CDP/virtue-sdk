@@ -274,6 +274,12 @@ declare class VirtueClient {
     buildClaimStabilityPoolTransaction(inputs: {
         accountObj?: string;
     }): Promise<Transaction>;
+    /**
+     * @description claim from stability pool
+     */
+    buildClaimBorrowRewards(inputs: {
+        accountObj?: string | TransactionArgument;
+    }): Transaction;
 }
 
 declare function getObjectNames(objectTypes: string[]): string[];
