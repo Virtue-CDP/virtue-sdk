@@ -685,7 +685,7 @@ var VirtueClient = class {
         });
       });
       const [responseAfterIncentive] = this.transaction.moveCall({
-        target: `${INCENTIVE_PACKAGE_ID}::destroy_checker`,
+        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
         typeArguments: [collateralType],
         arguments: [checker, globalConfigObj]
       });
