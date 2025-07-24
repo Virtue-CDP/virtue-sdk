@@ -22,11 +22,13 @@ var ORIGINAL_VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3
 var ORIGINAL_ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 var ORIGINAL_CDP_PACKAGE_ID = "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1";
 var ORIGINAL_STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
+var ORIGINAL_INCENTIVE_PACKAGE_ID = "0x66db06be17b524806ce0872883f1ca2557a3e8d2a299c53676a29a1d37ae571e";
 var FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
 var VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
 var ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 var CDP_PACKAGE_ID = "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22";
 var STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
+var INCENTIVE_PACKAGE_ID = "0x35b098c2341254763b66793ffc94cce67f8b13f77446556792b3136c80fdfee7";
 var CLOCK_OBJ = {
   objectId: "0x0000000000000000000000000000000000000000000000000000000000000006",
   mutable: false,
@@ -61,7 +63,15 @@ var VAULT_MAP = {
       objectId: "0xc9cb494657425f350af0948b8509efdd621626922e9337fd65eb161ec33de259",
       mutable: true,
       initialSharedVersion: 22329896
-    }
+    },
+    rewarders: [
+      {
+        objectId: "0x0701497c515752d07405f3e3bfaac8ba8885bd3de2ddd5bf5c76dcbdde2d276e",
+        mutable: true,
+        initialSharedVersion: 119903159,
+        rewardSymbol: "stIOTA"
+      }
+    ]
   }
 };
 var PYTH_STATE_ID = "0x6bc33855c7675e006f55609f61eebb1c8a104d8973a698ee9efd3127c210b37f";
@@ -89,6 +99,16 @@ var STABILITY_POOL_OBJ = {
   mutable: true
 };
 var STABILITY_POOL_TABLE_ID = "0x6dd808c50bab98757f7523562bdef7d33d506bb447ea9e708072bf13a5e29f02";
+var VAULT_REWARDER_REGISTRY_OBJ = {
+  objectId: "0xcbd87f80cdb060ed7f79c941572e3ea7ac941e0e7dd38d89d88a27afddf318ec",
+  mutable: false,
+  initialSharedVersion: 100755676
+};
+var INCENTIVE_GLOBAL_CONFIG_OBJ = {
+  objectId: "0x64e4e701bd1a7e6eba611e9f4799131ed38b135f736b5043710dd6897eb186fa",
+  mutable: false,
+  initialSharedVersion: 100755676
+};
 
 // src/utils/format.ts
 import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
@@ -632,14 +652,50 @@ var VirtueClient = class {
    */
   checkResponse(inputs) {
     const { collateralSymbol, response } = inputs;
+    let updateResponse = response;
     const vault = VAULT_MAP[collateralSymbol].vault;
+    const vaultObj = this.transaction.sharedObjectRef(vault);
+    const collateralType = COIN_TYPES[collateralSymbol];
+    const rewarders = VAULT_MAP[collateralSymbol].rewarders;
+    if (rewarders) {
+      const globalConfigObj = this.transaction.sharedObjectRef(
+        INCENTIVE_GLOBAL_CONFIG_OBJ
+      );
+      const registryObj = this.transaction.sharedObjectRef(
+        VAULT_REWARDER_REGISTRY_OBJ
+      );
+      const checker = this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
+        typeArguments: [collateralType],
+        arguments: [registryObj, globalConfigObj, updateResponse]
+      });
+      rewarders.map((rewarder) => {
+        const rewardType = COIN_TYPES[rewarder.rewardSymbol];
+        this.transaction.moveCall({
+          target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
+          typeArguments: [collateralType, rewardType],
+          arguments: [
+            checker,
+            globalConfigObj,
+            vaultObj,
+            this.transaction.sharedObjectRef(rewarder)
+          ]
+        });
+      });
+      const [responseAfterIncentive] = this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::destroy_checker`,
+        typeArguments: [collateralType],
+        arguments: [checker, globalConfigObj]
+      });
+      updateResponse = responseAfterIncentive;
+    }
     this.transaction.moveCall({
       target: `${CDP_PACKAGE_ID}::vault::destroy_response`,
       typeArguments: [COIN_TYPES[collateralSymbol]],
       arguments: [
-        this.transaction.sharedObjectRef(vault),
+        vaultObj,
         this.transaction.sharedObjectRef(TREASURY_OBJ),
-        response
+        updateResponse
       ]
     });
   }
@@ -931,9 +987,12 @@ export {
   COIN_DECIMALS,
   COIN_TYPES,
   FRAMEWORK_PACKAGE_ID,
+  INCENTIVE_GLOBAL_CONFIG_OBJ,
+  INCENTIVE_PACKAGE_ID,
   ORACLE_PACKAGE_ID,
   ORIGINAL_CDP_PACKAGE_ID,
   ORIGINAL_FRAMEWORK_PACKAGE_ID,
+  ORIGINAL_INCENTIVE_PACKAGE_ID,
   ORIGINAL_ORACLE_PACKAGE_ID,
   ORIGINAL_STABILITY_POOL_PACKAGE_ID,
   ORIGINAL_VUSD_PACKAGE_ID,
@@ -947,6 +1006,7 @@ export {
   TREASURY_OBJ,
   U64FromBytes,
   VAULT_MAP,
+  VAULT_REWARDER_REGISTRY_OBJ,
   VUSD_PACKAGE_ID,
   VirtueClient,
   WORMHOLE_STATE_ID,

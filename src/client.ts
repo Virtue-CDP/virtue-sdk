@@ -13,6 +13,8 @@ import {
   CLOCK_OBJ,
   COIN_TYPES,
   FRAMEWORK_PACKAGE_ID,
+  INCENTIVE_GLOBAL_CONFIG_OBJ,
+  INCENTIVE_PACKAGE_ID,
   ORACLE_PACKAGE_ID,
   PYTH_RULE_CONFIG_OBJ,
   PYTH_RULE_PACKAGE_ID,
@@ -22,6 +24,7 @@ import {
   STABILITY_POOL_TABLE_ID,
   TREASURY_OBJ,
   VAULT_MAP,
+  VAULT_REWARDER_REGISTRY_OBJ,
   WORMHOLE_STATE_ID,
 } from "@/constants";
 import {
@@ -549,14 +552,50 @@ export class VirtueClient {
     response: TransactionArgument;
   }) {
     const { collateralSymbol, response } = inputs;
+    let updateResponse = response;
     const vault = VAULT_MAP[collateralSymbol].vault;
+    const vaultObj = this.transaction.sharedObjectRef(vault);
+    const collateralType = COIN_TYPES[collateralSymbol];
+    const rewarders = VAULT_MAP[collateralSymbol].rewarders;
+    if (rewarders) {
+      const globalConfigObj = this.transaction.sharedObjectRef(
+        INCENTIVE_GLOBAL_CONFIG_OBJ,
+      );
+      const registryObj = this.transaction.sharedObjectRef(
+        VAULT_REWARDER_REGISTRY_OBJ,
+      );
+      const checker = this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
+        typeArguments: [collateralType],
+        arguments: [registryObj, globalConfigObj, updateResponse],
+      });
+      rewarders.map((rewarder) => {
+        const rewardType = COIN_TYPES[rewarder.rewardSymbol];
+        this.transaction.moveCall({
+          target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
+          typeArguments: [collateralType, rewardType],
+          arguments: [
+            checker,
+            globalConfigObj,
+            vaultObj,
+            this.transaction.sharedObjectRef(rewarder),
+          ],
+        });
+      });
+      const [responseAfterIncentive] = this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::destroy_checker`,
+        typeArguments: [collateralType],
+        arguments: [checker, globalConfigObj],
+      });
+      updateResponse = responseAfterIncentive;
+    }
     this.transaction.moveCall({
       target: `${CDP_PACKAGE_ID}::vault::destroy_response`,
       typeArguments: [COIN_TYPES[collateralSymbol]],
       arguments: [
-        this.transaction.sharedObjectRef(vault),
+        vaultObj,
         this.transaction.sharedObjectRef(TREASURY_OBJ),
-        response,
+        updateResponse,
       ],
     });
   }
