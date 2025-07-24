@@ -664,6 +664,7 @@ var VirtueClient = class {
       const registryObj = this.transaction.sharedObjectRef(
         VAULT_REWARDER_REGISTRY_OBJ
       );
+      const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
       const checker = this.transaction.moveCall({
         target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
         typeArguments: [collateralType],
@@ -678,7 +679,8 @@ var VirtueClient = class {
             checker,
             globalConfigObj,
             vaultObj,
-            this.transaction.sharedObjectRef(rewarder)
+            this.transaction.sharedObjectRef(rewarder),
+            clockObj
           ]
         });
       });
