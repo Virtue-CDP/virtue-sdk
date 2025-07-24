@@ -300,7 +300,11 @@ export class VirtueClient {
       const rewarder = rewarders[idx];
       if (value.returnValues) {
         const [rewardAmount] = value.returnValues;
-        rewards[rewarder.rewardSymbol] = Number(rewardAmount);
+        rewards[rewarder.rewardSymbol] = Number(
+          rewardAmount
+            ? bcs.u64().parse(Uint8Array.from(rewardAmount[0]))
+            : "0",
+        );
       }
     });
     return rewards;
