@@ -16,6 +16,7 @@ import {
   INCENTIVE_GLOBAL_CONFIG_OBJ,
   INCENTIVE_PACKAGE_ID,
   ORACLE_PACKAGE_ID,
+  POOL_REWARDER_REGISTRY_OBJ,
   PYTH_RULE_CONFIG_OBJ,
   PYTH_RULE_PACKAGE_ID,
   PYTH_STATE_ID,
@@ -780,7 +781,7 @@ export class VirtueClient {
       INCENTIVE_GLOBAL_CONFIG_OBJ,
     );
     const registryObj = this.transaction.sharedObjectRef(
-      VAULT_REWARDER_REGISTRY_OBJ,
+      POOL_REWARDER_REGISTRY_OBJ,
     );
     const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
     const checker = this.transaction.moveCall({

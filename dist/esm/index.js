@@ -862,7 +862,7 @@ var VirtueClient = class {
       INCENTIVE_GLOBAL_CONFIG_OBJ
     );
     const registryObj = this.transaction.sharedObjectRef(
-      VAULT_REWARDER_REGISTRY_OBJ
+      POOL_REWARDER_REGISTRY_OBJ
     );
     const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
     const checker = this.transaction.moveCall({
