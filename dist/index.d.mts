@@ -248,6 +248,7 @@ declare class VirtueClient {
         withdrawAmount: string;
         accountObjId?: string;
         recipient?: string;
+        keepTransaction?: boolean;
     }): Promise<Transaction>;
     /**
      * @description build and return Transaction of close position
@@ -260,6 +261,7 @@ declare class VirtueClient {
         collateralSymbol: COLLATERAL_COIN;
         accountObjId?: string;
         recipient?: string;
+        keepTransaction?: boolean;
     }): Promise<Transaction>;
     /**
      * @description build and return Transaction of deposit stability pool
@@ -269,6 +271,7 @@ declare class VirtueClient {
     buildDepositStabilityPoolTransaction(inputs: {
         depositAmount: string;
         recipient?: string;
+        keepTransaction?: boolean;
     }): Promise<Transaction>;
     /**
      * @description build and return Transaction of withdraw stability pool
@@ -278,6 +281,7 @@ declare class VirtueClient {
     buildWithdrawStabilityPoolTransaction(inputs: {
         withdrawAmount: string;
         accountObj?: string;
+        keepTransaction?: boolean;
     }): Promise<Transaction>;
     /**
      * @description build and return Transaction of withdraw stability pool
@@ -286,17 +290,26 @@ declare class VirtueClient {
      */
     buildClaimStabilityPoolTransaction(inputs: {
         accountObj?: string;
+        keepTransaction?: boolean;
     }): Promise<Transaction>;
     /**
      * @description claim the rewards from borrow incentive program
      */
     buildClaimBorrowRewards(inputs: {
         accountObj?: string | TransactionArgument;
+        keepTransaction?: boolean;
     }): Transaction;
     /**
      * @description claim the rewards from stability pool incentive program
      */
     buildClaimStabilityPoolRewards(inputs: {
+        accountObj?: string | TransactionArgument;
+        keepTransaction?: boolean;
+    }): Transaction;
+    /**
+     * @description claim total rewards
+     */
+    buildClaimTotalRewards(inputs: {
         accountObj?: string | TransactionArgument;
     }): Transaction;
 }
@@ -336,7 +349,7 @@ declare const VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa
 declare const ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 declare const CDP_PACKAGE_ID = "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22";
 declare const STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
-declare const INCENTIVE_PACKAGE_ID = "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019";
+declare const INCENTIVE_PACKAGE_ID = "0x12d5c2472d63a22f32ed632c13682afd29f81e67e271a73253392e2a5bf0dc90";
 declare const CLOCK_OBJ: SharedObjectRef;
 declare const TREASURY_OBJ: SharedObjectRef;
 type SharedObjectRef = {

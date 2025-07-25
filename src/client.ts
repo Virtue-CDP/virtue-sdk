@@ -315,7 +315,6 @@ export class VirtueClient {
       transactionBlock: tx,
       sender: accountAddr,
     });
-    console.log(res.results);
     if (!res.results) return {};
     const rewards: Rewards = {};
     res.results.map((value, idx) => {
@@ -348,7 +347,7 @@ export class VirtueClient {
         typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           tx.sharedObjectRef(rewarder),
-          this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+          tx.sharedObjectRef(STABILITY_POOL_OBJ),
           tx.pure.address(accountAddr),
           tx.sharedObjectRef(CLOCK_OBJ),
         ],
@@ -363,7 +362,7 @@ export class VirtueClient {
     const rewards: Rewards = {};
     res.results.map((value, idx) => {
       const rewarder = STABILITY_POOL_REWARDERS[idx];
-      if (value.returnValues) {
+      if (rewarder && value.returnValues) {
         const [rewardAmount] = value.returnValues;
         rewards[rewarder.rewardSymbol] = Number(
           rewardAmount
@@ -851,10 +850,8 @@ export class VirtueClient {
     withdrawAmount: string;
     accountObjId?: string;
     recipient?: string;
+    keepTransaction?: boolean;
   }): Promise<Transaction> {
-    this.resetTransaction();
-    if (!this.sender) throw new Error("Sender is not set");
-    this.transaction.setSender(this.sender);
     const {
       collateralSymbol,
       depositAmount,
@@ -863,7 +860,11 @@ export class VirtueClient {
       withdrawAmount,
       accountObjId,
       recipient,
+      keepTransaction,
     } = inputs;
+    if (!keepTransaction) this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const coinType = COIN_TYPES[collateralSymbol];
     const [depositCoin] = await this.splitInputCoins(
       collateralSymbol,
@@ -948,7 +949,7 @@ export class VirtueClient {
         arguments: [vusdCoin],
       });
       const tx = this.getTransaction();
-      this.resetTransaction();
+      if (!keepTransaction) this.resetTransaction();
       return tx;
     }
   }
@@ -964,11 +965,13 @@ export class VirtueClient {
     collateralSymbol: COLLATERAL_COIN;
     accountObjId?: string;
     recipient?: string;
+    keepTransaction?: boolean;
   }): Promise<Transaction> {
-    this.resetTransaction();
+    const { collateralSymbol, accountObjId, recipient, keepTransaction } =
+      inputs;
+    if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
-    const { collateralSymbol, accountObjId, recipient } = inputs;
     const collType = COIN_TYPES[collateralSymbol];
     const vaultObj = VAULT_MAP[collateralSymbol].vault;
     const [collAmount, debtAmount] = this.transaction.moveCall({
@@ -1009,7 +1012,7 @@ export class VirtueClient {
     );
 
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
 
@@ -1021,16 +1024,17 @@ export class VirtueClient {
   async buildDepositStabilityPoolTransaction(inputs: {
     depositAmount: string;
     recipient?: string;
+    keepTransaction?: boolean;
   }): Promise<Transaction> {
-    this.resetTransaction();
+    const { depositAmount, recipient, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
-    const { depositAmount, recipient } = inputs;
     const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
     const [response] = this.depositStabilityPool({ vusdCoin, recipient });
     this.checkResponseForStabilityPool(response);
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
 
@@ -1042,11 +1046,12 @@ export class VirtueClient {
   async buildWithdrawStabilityPoolTransaction(inputs: {
     withdrawAmount: string;
     accountObj?: string;
+    keepTransaction?: boolean;
   }): Promise<Transaction> {
-    this.resetTransaction();
+    const { withdrawAmount: amount, accountObj, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
-    const { withdrawAmount: amount, accountObj } = inputs;
     const [vusdOut, response] = this.withdrawStabilityPool({
       amount,
       accountObj,
@@ -1054,7 +1059,7 @@ export class VirtueClient {
     this.checkResponseForStabilityPool(response);
     this.transaction.transferObjects([vusdOut], this.sender);
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
 
@@ -1065,14 +1070,16 @@ export class VirtueClient {
    */
   async buildClaimStabilityPoolTransaction(inputs: {
     accountObj?: string;
+    keepTransaction?: boolean;
   }): Promise<Transaction> {
-    this.resetTransaction();
+    const { keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
     const collCoins = this.claimStabilityPool(inputs);
     this.transaction.transferObjects(collCoins, this.sender);
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
 
@@ -1081,9 +1088,10 @@ export class VirtueClient {
    */
   buildClaimBorrowRewards(inputs: {
     accountObj?: string | TransactionArgument;
+    keepTransaction?: boolean;
   }): Transaction {
-    this.resetTransaction();
-    const { accountObj } = inputs;
+    const { accountObj, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
       INCENTIVE_GLOBAL_CONFIG_OBJ,
@@ -1097,7 +1105,10 @@ export class VirtueClient {
         rewarders.map((rewarder) => {
           const [reward] = this.transaction.moveCall({
             target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::claim`,
-            typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+            typeArguments: [
+              COIN_TYPES[collSymbol as COLLATERAL_COIN],
+              COIN_TYPES[rewarder.rewardSymbol],
+            ],
             arguments: [
               this.transaction.sharedObjectRef(rewarder),
               globalConfigObj,
@@ -1111,7 +1122,7 @@ export class VirtueClient {
       }
     });
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
 
@@ -1120,9 +1131,10 @@ export class VirtueClient {
    */
   buildClaimStabilityPoolRewards(inputs: {
     accountObj?: string | TransactionArgument;
+    keepTransaction?: boolean;
   }): Transaction {
-    this.resetTransaction();
-    const { accountObj } = inputs;
+    const { accountObj, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
       INCENTIVE_GLOBAL_CONFIG_OBJ,
@@ -1144,6 +1156,20 @@ export class VirtueClient {
       });
       this.transaction.transferObjects([reward], this.sender);
     });
+    const tx = this.getTransaction();
+    if (!keepTransaction) this.resetTransaction();
+    return tx;
+  }
+
+  /**
+   * @description claim total rewards
+   */
+  buildClaimTotalRewards(inputs: {
+    accountObj?: string | TransactionArgument;
+  }): Transaction {
+    this.resetTransaction();
+    this.buildClaimBorrowRewards({ ...inputs, keepTransaction: true });
+    this.buildClaimStabilityPoolRewards({ ...inputs, keepTransaction: true });
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
