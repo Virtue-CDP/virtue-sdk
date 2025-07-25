@@ -287,7 +287,9 @@ export class VirtueClient {
     if (!isValidIotaAddress(accountAddr)) {
       throw new Error("Invalid debtor address");
     }
-    const rewarders = VAULT_MAP[collateralSymbol].rewarders;
+    const vaultInfo = VAULT_MAP[collateralSymbol];
+    const rewarders = vaultInfo.rewarders;
+    const vaultObj = this.transaction.sharedObjectRef(vaultInfo.vault);
     if (!rewarders) return {};
     rewarders.map((rewarder) => {
       tx.moveCall({
@@ -295,6 +297,7 @@ export class VirtueClient {
         typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           tx.sharedObjectRef(rewarder),
+          vaultObj,
           tx.pure.address(accountAddr),
           tx.sharedObjectRef(CLOCK_OBJ),
         ],
@@ -330,12 +333,14 @@ export class VirtueClient {
     if (!isValidIotaAddress(accountAddr)) {
       throw new Error("Invalid debtor address");
     }
+
     STABILITY_POOL_REWARDERS.map((rewarder) => {
       tx.moveCall({
         target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::realtime_reward_amount`,
         typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           tx.sharedObjectRef(rewarder),
+          this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
           tx.pure.address(accountAddr),
           tx.sharedObjectRef(CLOCK_OBJ),
         ],

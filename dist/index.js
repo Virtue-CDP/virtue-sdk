@@ -445,7 +445,9 @@ var VirtueClient = class {
     if (!_utils.isValidIotaAddress.call(void 0, accountAddr)) {
       throw new Error("Invalid debtor address");
     }
-    const rewarders = VAULT_MAP[collateralSymbol].rewarders;
+    const vaultInfo = VAULT_MAP[collateralSymbol];
+    const rewarders = vaultInfo.rewarders;
+    const vaultObj = this.transaction.sharedObjectRef(vaultInfo.vault);
     if (!rewarders) return {};
     rewarders.map((rewarder) => {
       tx.moveCall({
@@ -453,6 +455,7 @@ var VirtueClient = class {
         typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           tx.sharedObjectRef(rewarder),
+          vaultObj,
           tx.pure.address(accountAddr),
           tx.sharedObjectRef(CLOCK_OBJ)
         ]
@@ -490,6 +493,7 @@ var VirtueClient = class {
         typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           tx.sharedObjectRef(rewarder),
+          this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
           tx.pure.address(accountAddr),
           tx.sharedObjectRef(CLOCK_OBJ)
         ]
