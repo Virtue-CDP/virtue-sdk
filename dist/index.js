@@ -28,7 +28,7 @@ var VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75
 var ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 var CDP_PACKAGE_ID = "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22";
 var STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
-var INCENTIVE_PACKAGE_ID = "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019";
+var INCENTIVE_PACKAGE_ID = "0x12d5c2472d63a22f32ed632c13682afd29f81e67e271a73253392e2a5bf0dc90";
 var CLOCK_OBJ = {
   objectId: "0x0000000000000000000000000000000000000000000000000000000000000006",
   mutable: false,
@@ -916,9 +916,6 @@ var VirtueClient = class {
    * @returns Transaction
    */
   async buildManagePositionTransaction(inputs) {
-    this.resetTransaction();
-    if (!this.sender) throw new Error("Sender is not set");
-    this.transaction.setSender(this.sender);
     const {
       collateralSymbol,
       depositAmount,
@@ -926,8 +923,12 @@ var VirtueClient = class {
       repaymentAmount,
       withdrawAmount,
       accountObjId,
-      recipient
+      recipient,
+      keepTransaction
     } = inputs;
+    if (!keepTransaction) this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const coinType = COIN_TYPES[collateralSymbol];
     const [depositCoin] = await this.splitInputCoins(
       collateralSymbol,
@@ -1004,7 +1005,7 @@ var VirtueClient = class {
         arguments: [vusdCoin]
       });
       const tx = this.getTransaction();
-      this.resetTransaction();
+      if (!keepTransaction) this.resetTransaction();
       return tx;
     }
   }
@@ -1016,10 +1017,10 @@ var VirtueClient = class {
    * @returns Transaction
    */
   async buildClosePositionTransaction(inputs) {
-    this.resetTransaction();
+    const { collateralSymbol, accountObjId, recipient, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
-    const { collateralSymbol, accountObjId, recipient } = inputs;
     const collType = COIN_TYPES[collateralSymbol];
     const vaultObj = VAULT_MAP[collateralSymbol].vault;
     const [collAmount, debtAmount] = this.transaction.moveCall({
@@ -1055,7 +1056,7 @@ var VirtueClient = class {
       _nullishCoalesce(recipient, () => ( this.transaction.pure.address(this.sender)))
     );
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
   /**
@@ -1064,15 +1065,15 @@ var VirtueClient = class {
    * @returns Transaction
    */
   async buildDepositStabilityPoolTransaction(inputs) {
-    this.resetTransaction();
+    const { depositAmount, recipient, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
-    const { depositAmount, recipient } = inputs;
     const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
     const [response] = this.depositStabilityPool({ vusdCoin, recipient });
     this.checkResponseForStabilityPool(response);
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
   /**
@@ -1081,10 +1082,10 @@ var VirtueClient = class {
    * @returns Transaction
    */
   async buildWithdrawStabilityPoolTransaction(inputs) {
-    this.resetTransaction();
+    const { withdrawAmount: amount, accountObj, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
-    const { withdrawAmount: amount, accountObj } = inputs;
     const [vusdOut, response] = this.withdrawStabilityPool({
       amount,
       accountObj
@@ -1092,7 +1093,7 @@ var VirtueClient = class {
     this.checkResponseForStabilityPool(response);
     this.transaction.transferObjects([vusdOut], this.sender);
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
   /**
@@ -1101,21 +1102,22 @@ var VirtueClient = class {
    * @returns Transaction
    */
   async buildClaimStabilityPoolTransaction(inputs) {
-    this.resetTransaction();
+    const { keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
     const collCoins = this.claimStabilityPool(inputs);
     this.transaction.transferObjects(collCoins, this.sender);
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
   /**
    * @description claim the rewards from borrow incentive program
    */
   buildClaimBorrowRewards(inputs) {
-    this.resetTransaction();
-    const { accountObj } = inputs;
+    const { accountObj, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
       INCENTIVE_GLOBAL_CONFIG_OBJ
@@ -1129,7 +1131,10 @@ var VirtueClient = class {
         rewarders.map((rewarder) => {
           const [reward] = this.transaction.moveCall({
             target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::claim`,
-            typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+            typeArguments: [
+              COIN_TYPES[collSymbol],
+              COIN_TYPES[rewarder.rewardSymbol]
+            ],
             arguments: [
               this.transaction.sharedObjectRef(rewarder),
               globalConfigObj,
@@ -1143,15 +1148,15 @@ var VirtueClient = class {
       }
     });
     const tx = this.getTransaction();
-    this.resetTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
   /**
    * @description claim the rewards from stability pool incentive program
    */
   buildClaimStabilityPoolRewards(inputs) {
-    this.resetTransaction();
-    const { accountObj } = inputs;
+    const { accountObj, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
       INCENTIVE_GLOBAL_CONFIG_OBJ
@@ -1172,6 +1177,17 @@ var VirtueClient = class {
       });
       this.transaction.transferObjects([reward], this.sender);
     });
+    const tx = this.getTransaction();
+    if (!keepTransaction) this.resetTransaction();
+    return tx;
+  }
+  /**
+   * @description claim total rewards
+   */
+  buildClaimTotalRewards(inputs) {
+    this.resetTransaction();
+    this.buildClaimBorrowRewards({ ...inputs, keepTransaction: true });
+    this.buildClaimStabilityPoolRewards({ ...inputs, keepTransaction: true });
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
