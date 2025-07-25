@@ -497,7 +497,7 @@ var VirtueClient = class {
         typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           tx.sharedObjectRef(rewarder),
-          this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+          tx.sharedObjectRef(STABILITY_POOL_OBJ),
           tx.pure.address(accountAddr),
           tx.sharedObjectRef(CLOCK_OBJ)
         ]
@@ -511,7 +511,7 @@ var VirtueClient = class {
     const rewards = {};
     res.results.map((value, idx) => {
       const rewarder = STABILITY_POOL_REWARDERS[idx];
-      if (value.returnValues) {
+      if (rewarder && value.returnValues) {
         const [rewardAmount] = value.returnValues;
         rewards[rewarder.rewardSymbol] = Number(
           rewardAmount ? _bcs.bcs.u64().parse(Uint8Array.from(rewardAmount[0])) : "0"

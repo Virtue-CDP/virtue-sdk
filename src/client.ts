@@ -310,7 +310,6 @@ export class VirtueClient {
       transactionBlock: tx,
       sender: accountAddr,
     });
-    console.log(res.results);
     if (!res.results) return {};
     const rewards: Rewards = {};
     res.results.map((value, idx) => {
@@ -343,7 +342,7 @@ export class VirtueClient {
         typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           tx.sharedObjectRef(rewarder),
-          this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+          tx.sharedObjectRef(STABILITY_POOL_OBJ),
           tx.pure.address(accountAddr),
           tx.sharedObjectRef(CLOCK_OBJ),
         ],
@@ -358,7 +357,7 @@ export class VirtueClient {
     const rewards: Rewards = {};
     res.results.map((value, idx) => {
       const rewarder = STABILITY_POOL_REWARDERS[idx];
-      if (value.returnValues) {
+      if (rewarder && value.returnValues) {
         const [rewardAmount] = value.returnValues;
         rewards[rewarder.rewardSymbol] = Number(
           rewardAmount
