@@ -468,7 +468,6 @@ var VirtueClient = class {
       transactionBlock: tx,
       sender: accountAddr
     });
-    console.log(res.results);
     if (!res.results) return {};
     const rewards = {};
     res.results.map((value, idx) => {
