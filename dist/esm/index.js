@@ -884,7 +884,7 @@ var VirtueClient = class {
       });
     });
     const [responseAfterIncentive] = this.transaction.moveCall({
-      target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
+      target: `${INCENTIVE_PACKAGE_ID}::stability_pool_incentive::destroy_checker`,
       arguments: [checker, globalConfigObj]
     });
     positionResponse = responseAfterIncentive;
