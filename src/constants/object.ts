@@ -13,7 +13,7 @@ export const ORIGINAL_CDP_PACKAGE_ID =
 export const ORIGINAL_STABILITY_POOL_PACKAGE_ID =
   "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
 export const ORIGINAL_INCENTIVE_PACKAGE_ID =
-  "0x66db06be17b524806ce0872883f1ca2557a3e8d2a299c53676a29a1d37ae571e";
+  "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019";
 
 /// Latest Package IDs
 
@@ -28,7 +28,7 @@ export const CDP_PACKAGE_ID =
 export const STABILITY_POOL_PACKAGE_ID =
   "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
 export const INCENTIVE_PACKAGE_ID =
-  "0x728ba0d8cc3ac19814442f4f626f463ebd1a0b9492c5ad756d717bff72dda1de";
+  "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019";
 
 /// Shared Objects
 
@@ -62,8 +62,10 @@ export type VaultObjectInfo = {
   priceAggregater: SharedObjectRef;
   vault: SharedObjectRef;
   pythPriceId?: string;
-  rewarders?: (SharedObjectRef & { rewardSymbol: COIN })[];
+  rewarders?: Rewarder[];
 };
+
+export type Rewarder = SharedObjectRef & { rewardSymbol: COIN };
 
 export const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo> = {
   IOTA: {
@@ -98,9 +100,9 @@ export const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo> = {
     rewarders: [
       {
         objectId:
-          "0x0701497c515752d07405f3e3bfaac8ba8885bd3de2ddd5bf5c76dcbdde2d276e",
+          "0xf9ac7f70f1e364cd31734f5a3ebf5c580d3da11c06ca6d7832e82cc417e022eb",
         mutable: true,
-        initialSharedVersion: 119903159,
+        initialSharedVersion: 121322517,
         rewardSymbol: "stIOTA",
       },
     ],
@@ -141,19 +143,37 @@ export const STABILITY_POOL_OBJ: SharedObjectRef = {
   initialSharedVersion: 22329903,
   mutable: true,
 };
+
 export const STABILITY_POOL_TABLE_ID =
   "0x6dd808c50bab98757f7523562bdef7d33d506bb447ea9e708072bf13a5e29f02";
 
-export const VAULT_REWARDER_REGISTRY_OBJ: SharedObjectRef = {
-  objectId:
-    "0xcbd87f80cdb060ed7f79c941572e3ea7ac941e0e7dd38d89d88a27afddf318ec",
-  mutable: false,
-  initialSharedVersion: 100755676,
-};
-
 export const INCENTIVE_GLOBAL_CONFIG_OBJ: SharedObjectRef = {
   objectId:
-    "0x64e4e701bd1a7e6eba611e9f4799131ed38b135f736b5043710dd6897eb186fa",
+    "0xc30c82b96429c2c215dbc994e73250c8b29e747c9540a547c7bc95e6d7e098d8",
   mutable: false,
-  initialSharedVersion: 100755676,
+  initialSharedVersion: 120165683,
 };
+
+export const VAULT_REWARDER_REGISTRY_OBJ: SharedObjectRef = {
+  objectId:
+    "0x3b5a6649ce2c4348ae7d2dc72bc8e42cecfc6c24b9edb701635f9c49c765ff69",
+  mutable: false,
+  initialSharedVersion: 120165683,
+};
+
+export const POOL_REWARDER_REGISTRY_OBJ: SharedObjectRef = {
+  objectId:
+    "0xc043719e2da72c1182466bbccf01b966d500337749cd6a06e042714444d2852c",
+  mutable: false,
+  initialSharedVersion: 120165683,
+};
+
+export const STABILITY_POOL_REWARDERS: Rewarder[] = [
+  {
+    objectId:
+      "0xb295972b5c978ebb96339b81a762cbc047be78747c2f7d19e661281560394c2b",
+    mutable: true,
+    initialSharedVersion: 121322519,
+    rewardSymbol: "stIOTA",
+  },
+];

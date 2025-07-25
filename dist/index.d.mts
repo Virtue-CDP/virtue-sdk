@@ -105,9 +105,22 @@ declare class VirtueClient {
      * @description Get debtor's position data
      */
     getDebtorPositions(debtor?: string): Promise<PositionInfo[]>;
+    /**
+     * @description Get data from stability pool
+     */
     getStabilityPool(): Promise<StabilityPoolInfo>;
+    /**
+     * @description Get user's balances in stability pool
+     */
     getStabilityPoolBalances(account?: string): Promise<StabilityPoolBalances>;
+    /**
+     * @description Get reward amounts from borrow incentive program
+     */
     getBorrowRewards(collateralSymbol: COLLATERAL_COIN, account?: string): Promise<Rewards>;
+    /**
+     * @description Get reward amounts from stability pool incentive program
+     */
+    getStabilityPoolRewards(account?: string): Promise<Rewards>;
     /**
      * @description new zero coin
      */
@@ -275,9 +288,15 @@ declare class VirtueClient {
         accountObj?: string;
     }): Promise<Transaction>;
     /**
-     * @description claim from stability pool
+     * @description claim the rewards from borrow incentive program
      */
     buildClaimBorrowRewards(inputs: {
+        accountObj?: string | TransactionArgument;
+    }): Transaction;
+    /**
+     * @description claim the rewards from stability pool incentive program
+     */
+    buildClaimStabilityPoolRewards(inputs: {
         accountObj?: string | TransactionArgument;
     }): Transaction;
 }
@@ -311,13 +330,13 @@ declare const ORIGINAL_VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e82
 declare const ORIGINAL_ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 declare const ORIGINAL_CDP_PACKAGE_ID = "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1";
 declare const ORIGINAL_STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
-declare const ORIGINAL_INCENTIVE_PACKAGE_ID = "0x66db06be17b524806ce0872883f1ca2557a3e8d2a299c53676a29a1d37ae571e";
+declare const ORIGINAL_INCENTIVE_PACKAGE_ID = "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019";
 declare const FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
 declare const VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
 declare const ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 declare const CDP_PACKAGE_ID = "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22";
 declare const STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
-declare const INCENTIVE_PACKAGE_ID = "0x728ba0d8cc3ac19814442f4f626f463ebd1a0b9492c5ad756d717bff72dda1de";
+declare const INCENTIVE_PACKAGE_ID = "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019";
 declare const CLOCK_OBJ: SharedObjectRef;
 declare const TREASURY_OBJ: SharedObjectRef;
 type SharedObjectRef = {
@@ -333,9 +352,10 @@ type VaultObjectInfo = {
     priceAggregater: SharedObjectRef;
     vault: SharedObjectRef;
     pythPriceId?: string;
-    rewarders?: (SharedObjectRef & {
-        rewardSymbol: COIN;
-    })[];
+    rewarders?: Rewarder[];
+};
+type Rewarder = SharedObjectRef & {
+    rewardSymbol: COIN;
 };
 declare const VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo>;
 declare const PYTH_STATE_ID = "0x6bc33855c7675e006f55609f61eebb1c8a104d8973a698ee9efd3127c210b37f";
@@ -347,7 +367,9 @@ declare const CERT_NATIVE_POOL_OBJ: SharedObjectRef;
 declare const CERT_METADATA_OBJ: SharedObjectRef;
 declare const STABILITY_POOL_OBJ: SharedObjectRef;
 declare const STABILITY_POOL_TABLE_ID = "0x6dd808c50bab98757f7523562bdef7d33d506bb447ea9e708072bf13a5e29f02";
-declare const VAULT_REWARDER_REGISTRY_OBJ: SharedObjectRef;
 declare const INCENTIVE_GLOBAL_CONFIG_OBJ: SharedObjectRef;
+declare const VAULT_REWARDER_REGISTRY_OBJ: SharedObjectRef;
+declare const POOL_REWARDER_REGISTRY_OBJ: SharedObjectRef;
+declare const STABILITY_POOL_REWARDERS: Rewarder[];
 
-export { CDP_PACKAGE_ID, CERT_METADATA_OBJ, CERT_NATIVE_POOL_OBJ, CERT_RULE_PACKAGE_ID, CLOCK_OBJ, type COIN, COIN_DECIMALS, COIN_TYPES, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, INCENTIVE_GLOBAL_CONFIG_OBJ, INCENTIVE_PACKAGE_ID, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_INCENTIVE_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_STABILITY_POOL_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type RewarderInfo, type Rewards, STABILITY_POOL_OBJ, STABILITY_POOL_PACKAGE_ID, STABILITY_POOL_TABLE_ID, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VAULT_REWARDER_REGISTRY_OBJ, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };
+export { CDP_PACKAGE_ID, CERT_METADATA_OBJ, CERT_NATIVE_POOL_OBJ, CERT_RULE_PACKAGE_ID, CLOCK_OBJ, type COIN, COIN_DECIMALS, COIN_TYPES, type COLLATERAL_COIN, type Double, FRAMEWORK_PACKAGE_ID, type Float, INCENTIVE_GLOBAL_CONFIG_OBJ, INCENTIVE_PACKAGE_ID, type IotaObjectDataWithContent, ORACLE_PACKAGE_ID, ORIGINAL_CDP_PACKAGE_ID, ORIGINAL_FRAMEWORK_PACKAGE_ID, ORIGINAL_INCENTIVE_PACKAGE_ID, ORIGINAL_ORACLE_PACKAGE_ID, ORIGINAL_STABILITY_POOL_PACKAGE_ID, ORIGINAL_VUSD_PACKAGE_ID, ObjectContentFields, POOL_REWARDER_REGISTRY_OBJ, PYTH_RULE_CONFIG_OBJ, PYTH_RULE_PACKAGE_ID, PYTH_STATE_ID, type PositionInfo, type Rewarder, type RewarderInfo, type Rewards, STABILITY_POOL_OBJ, STABILITY_POOL_PACKAGE_ID, STABILITY_POOL_REWARDERS, STABILITY_POOL_TABLE_ID, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, TREASURY_OBJ, U64FromBytes, VAULT_MAP, VAULT_REWARDER_REGISTRY_OBJ, VUSD_PACKAGE_ID, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, WORMHOLE_STATE_ID, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, getPriceResultType, parseUnits, parseVaultObject };

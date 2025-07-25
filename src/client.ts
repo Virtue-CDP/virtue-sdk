@@ -21,6 +21,7 @@ import {
   PYTH_STATE_ID,
   STABILITY_POOL_OBJ,
   STABILITY_POOL_PACKAGE_ID,
+  STABILITY_POOL_REWARDERS,
   STABILITY_POOL_TABLE_ID,
   TREASURY_OBJ,
   VAULT_MAP,
@@ -213,6 +214,9 @@ export class VirtueClient {
     });
   }
 
+  /**
+   * @description Get data from stability pool
+   */
   async getStabilityPool(): Promise<StabilityPoolInfo> {
     const res = await this.iotaClient.getObject({
       id: STABILITY_POOL_OBJ.objectId,
@@ -229,6 +233,9 @@ export class VirtueClient {
     return { vusdBalance: fields.vusd_balance };
   }
 
+  /**
+   * @description Get user's balances in stability pool
+   */
   async getStabilityPoolBalances(
     account?: string,
   ): Promise<StabilityPoolBalances> {
@@ -267,6 +274,9 @@ export class VirtueClient {
     return { vusdBalance, collBalances };
   }
 
+  /**
+   * @description Get reward amounts from borrow incentive program
+   */
   async getBorrowRewards(
     collateralSymbol: COLLATERAL_COIN,
     account?: string,
@@ -298,6 +308,47 @@ export class VirtueClient {
     const rewards: Rewards = {};
     res.results.map((value, idx) => {
       const rewarder = rewarders[idx];
+      if (value.returnValues) {
+        const [rewardAmount] = value.returnValues;
+        rewards[rewarder.rewardSymbol] = Number(
+          rewardAmount
+            ? bcs.u64().parse(Uint8Array.from(rewardAmount[0]))
+            : "0",
+        );
+      }
+    });
+    return rewards;
+  }
+
+  /**
+   * @description Get reward amounts from stability pool incentive program
+   */
+  async getStabilityPoolRewards(account?: string): Promise<Rewards> {
+    const tx = new Transaction();
+    const accountAddr = account ?? this.sender;
+    if (!isValidIotaAddress(accountAddr)) {
+      throw new Error("Invalid debtor address");
+    }
+    STABILITY_POOL_REWARDERS.map((rewarder) => {
+      tx.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::realtime_reward_amount`,
+        typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+        arguments: [
+          tx.sharedObjectRef(rewarder),
+          tx.pure.address(accountAddr),
+          tx.sharedObjectRef(CLOCK_OBJ),
+        ],
+      });
+    });
+    const res = await this.iotaClient.devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: accountAddr,
+    });
+    if (!res.results) return {};
+
+    const rewards: Rewards = {};
+    res.results.map((value, idx) => {
+      const rewarder = STABILITY_POOL_REWARDERS[idx];
       if (value.returnValues) {
         const [rewardAmount] = value.returnValues;
         rewards[rewarder.rewardSymbol] = Number(
@@ -601,40 +652,38 @@ export class VirtueClient {
     const vaultObj = this.transaction.sharedObjectRef(vault);
     const collateralType = COIN_TYPES[collateralSymbol];
     const rewarders = VAULT_MAP[collateralSymbol].rewarders;
-    if (rewarders) {
-      const globalConfigObj = this.transaction.sharedObjectRef(
-        INCENTIVE_GLOBAL_CONFIG_OBJ,
-      );
-      const registryObj = this.transaction.sharedObjectRef(
-        VAULT_REWARDER_REGISTRY_OBJ,
-      );
-      const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
-      const checker = this.transaction.moveCall({
-        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
-        typeArguments: [collateralType],
-        arguments: [registryObj, globalConfigObj, updateResponse],
+    const globalConfigObj = this.transaction.sharedObjectRef(
+      INCENTIVE_GLOBAL_CONFIG_OBJ,
+    );
+    const registryObj = this.transaction.sharedObjectRef(
+      VAULT_REWARDER_REGISTRY_OBJ,
+    );
+    const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
+    const checker = this.transaction.moveCall({
+      target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
+      typeArguments: [collateralType],
+      arguments: [registryObj, globalConfigObj, updateResponse],
+    });
+    (rewarders ?? []).map((rewarder) => {
+      const rewardType = COIN_TYPES[rewarder.rewardSymbol];
+      this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
+        typeArguments: [collateralType, rewardType],
+        arguments: [
+          checker,
+          globalConfigObj,
+          vaultObj,
+          this.transaction.sharedObjectRef(rewarder),
+          clockObj,
+        ],
       });
-      rewarders.map((rewarder) => {
-        const rewardType = COIN_TYPES[rewarder.rewardSymbol];
-        this.transaction.moveCall({
-          target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
-          typeArguments: [collateralType, rewardType],
-          arguments: [
-            checker,
-            globalConfigObj,
-            vaultObj,
-            this.transaction.sharedObjectRef(rewarder),
-            clockObj,
-          ],
-        });
-      });
-      const [responseAfterIncentive] = this.transaction.moveCall({
-        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
-        typeArguments: [collateralType],
-        arguments: [checker, globalConfigObj],
-      });
-      updateResponse = responseAfterIncentive;
-    }
+    });
+    const [responseAfterIncentive] = this.transaction.moveCall({
+      target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
+      typeArguments: [collateralType],
+      arguments: [checker, globalConfigObj],
+    });
+    updateResponse = responseAfterIncentive;
     this.transaction.moveCall({
       target: `${CDP_PACKAGE_ID}::vault::destroy_response`,
       typeArguments: [COIN_TYPES[collateralSymbol]],
@@ -726,11 +775,43 @@ export class VirtueClient {
    * @param response: PositionResponse
    */
   checkResponseForStabilityPool(response: TransactionArgument) {
+    let positionResponse = response;
+    const globalConfigObj = this.transaction.sharedObjectRef(
+      INCENTIVE_GLOBAL_CONFIG_OBJ,
+    );
+    const registryObj = this.transaction.sharedObjectRef(
+      VAULT_REWARDER_REGISTRY_OBJ,
+    );
+    const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
+    const checker = this.transaction.moveCall({
+      target: `${INCENTIVE_PACKAGE_ID}::stability_pool_incentive::new_checker`,
+      arguments: [registryObj, globalConfigObj, positionResponse],
+    });
+    (STABILITY_POOL_REWARDERS ?? []).map((rewarder) => {
+      const rewardType = COIN_TYPES[rewarder.rewardSymbol];
+      this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::stability_pool_incentive::update`,
+        typeArguments: [rewardType],
+        arguments: [
+          checker,
+          globalConfigObj,
+          this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+          this.transaction.sharedObjectRef(rewarder),
+          clockObj,
+        ],
+      });
+    });
+    const [responseAfterIncentive] = this.transaction.moveCall({
+      target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
+      arguments: [checker, globalConfigObj],
+    });
+    positionResponse = responseAfterIncentive;
+
     this.transaction.moveCall({
       target: `${STABILITY_POOL_PACKAGE_ID}::stability_pool::check_response`,
       arguments: [
         this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
-        response,
+        positionResponse,
       ],
     });
   }
@@ -970,7 +1051,7 @@ export class VirtueClient {
   }
 
   /**
-   * @description claim from stability pool
+   * @description claim the rewards from borrow incentive program
    */
   buildClaimBorrowRewards(inputs: {
     accountObj?: string | TransactionArgument;
@@ -983,7 +1064,9 @@ export class VirtueClient {
     );
     const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
     Object.keys(VAULT_MAP).map((collSymbol) => {
-      const rewarders = VAULT_MAP[collSymbol as COLLATERAL_COIN].rewarders;
+      const vaultInfo = VAULT_MAP[collSymbol as COLLATERAL_COIN];
+      const rewarders = vaultInfo.rewarders;
+      const vaultObj = this.transaction.sharedObjectRef(vaultInfo.vault);
       if (rewarders) {
         rewarders.map((rewarder) => {
           const [reward] = this.transaction.moveCall({
@@ -992,6 +1075,7 @@ export class VirtueClient {
             arguments: [
               this.transaction.sharedObjectRef(rewarder),
               globalConfigObj,
+              vaultObj,
               accountReq,
               clockObj,
             ],
@@ -999,6 +1083,40 @@ export class VirtueClient {
           this.transaction.transferObjects([reward], this.sender);
         });
       }
+    });
+    const tx = this.getTransaction();
+    this.resetTransaction();
+    return tx;
+  }
+
+  /**
+   * @description claim the rewards from stability pool incentive program
+   */
+  buildClaimStabilityPoolRewards(inputs: {
+    accountObj?: string | TransactionArgument;
+  }): Transaction {
+    this.resetTransaction();
+    const { accountObj } = inputs;
+    const [accountReq] = this.newAccountRequest(accountObj);
+    const globalConfigObj = this.transaction.sharedObjectRef(
+      INCENTIVE_GLOBAL_CONFIG_OBJ,
+    );
+    const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
+    const stabilityPoolObj =
+      this.transaction.sharedObjectRef(STABILITY_POOL_OBJ);
+    STABILITY_POOL_REWARDERS.map((rewarder) => {
+      const [reward] = this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::stability_pool_incentive::claim`,
+        typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+        arguments: [
+          this.transaction.sharedObjectRef(rewarder),
+          globalConfigObj,
+          stabilityPoolObj,
+          accountReq,
+          clockObj,
+        ],
+      });
+      this.transaction.transferObjects([reward], this.sender);
     });
     const tx = this.getTransaction();
     this.resetTransaction();

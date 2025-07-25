@@ -22,13 +22,13 @@ var ORIGINAL_VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3
 var ORIGINAL_ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 var ORIGINAL_CDP_PACKAGE_ID = "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1";
 var ORIGINAL_STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
-var ORIGINAL_INCENTIVE_PACKAGE_ID = "0x66db06be17b524806ce0872883f1ca2557a3e8d2a299c53676a29a1d37ae571e";
+var ORIGINAL_INCENTIVE_PACKAGE_ID = "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019";
 var FRAMEWORK_PACKAGE_ID = "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b";
 var VUSD_PACKAGE_ID = "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f";
 var ORACLE_PACKAGE_ID = "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf";
 var CDP_PACKAGE_ID = "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22";
 var STABILITY_POOL_PACKAGE_ID = "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b";
-var INCENTIVE_PACKAGE_ID = "0x728ba0d8cc3ac19814442f4f626f463ebd1a0b9492c5ad756d717bff72dda1de";
+var INCENTIVE_PACKAGE_ID = "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019";
 var CLOCK_OBJ = {
   objectId: "0x0000000000000000000000000000000000000000000000000000000000000006",
   mutable: false,
@@ -66,9 +66,9 @@ var VAULT_MAP = {
     },
     rewarders: [
       {
-        objectId: "0x0701497c515752d07405f3e3bfaac8ba8885bd3de2ddd5bf5c76dcbdde2d276e",
+        objectId: "0xf9ac7f70f1e364cd31734f5a3ebf5c580d3da11c06ca6d7832e82cc417e022eb",
         mutable: true,
-        initialSharedVersion: 119903159,
+        initialSharedVersion: 121322517,
         rewardSymbol: "stIOTA"
       }
     ]
@@ -99,16 +99,29 @@ var STABILITY_POOL_OBJ = {
   mutable: true
 };
 var STABILITY_POOL_TABLE_ID = "0x6dd808c50bab98757f7523562bdef7d33d506bb447ea9e708072bf13a5e29f02";
-var VAULT_REWARDER_REGISTRY_OBJ = {
-  objectId: "0xcbd87f80cdb060ed7f79c941572e3ea7ac941e0e7dd38d89d88a27afddf318ec",
-  mutable: false,
-  initialSharedVersion: 100755676
-};
 var INCENTIVE_GLOBAL_CONFIG_OBJ = {
-  objectId: "0x64e4e701bd1a7e6eba611e9f4799131ed38b135f736b5043710dd6897eb186fa",
+  objectId: "0xc30c82b96429c2c215dbc994e73250c8b29e747c9540a547c7bc95e6d7e098d8",
   mutable: false,
-  initialSharedVersion: 100755676
+  initialSharedVersion: 120165683
 };
+var VAULT_REWARDER_REGISTRY_OBJ = {
+  objectId: "0x3b5a6649ce2c4348ae7d2dc72bc8e42cecfc6c24b9edb701635f9c49c765ff69",
+  mutable: false,
+  initialSharedVersion: 120165683
+};
+var POOL_REWARDER_REGISTRY_OBJ = {
+  objectId: "0xc043719e2da72c1182466bbccf01b966d500337749cd6a06e042714444d2852c",
+  mutable: false,
+  initialSharedVersion: 120165683
+};
+var STABILITY_POOL_REWARDERS = [
+  {
+    objectId: "0xb295972b5c978ebb96339b81a762cbc047be78747c2f7d19e661281560394c2b",
+    mutable: true,
+    initialSharedVersion: 121322519,
+    rewardSymbol: "stIOTA"
+  }
+];
 
 // src/utils/format.ts
 import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
@@ -372,6 +385,9 @@ var VirtueClient = class {
       }
     });
   }
+  /**
+   * @description Get data from stability pool
+   */
   async getStabilityPool() {
     const res = await this.iotaClient.getObject({
       id: STABILITY_POOL_OBJ.objectId,
@@ -385,6 +401,9 @@ var VirtueClient = class {
     }
     return { vusdBalance: fields.vusd_balance };
   }
+  /**
+   * @description Get user's balances in stability pool
+   */
   async getStabilityPoolBalances(account) {
     const accountAddr = account ?? this.sender;
     if (!isValidIotaAddress(accountAddr)) {
@@ -417,6 +436,9 @@ var VirtueClient = class {
     });
     return { vusdBalance, collBalances };
   }
+  /**
+   * @description Get reward amounts from borrow incentive program
+   */
   async getBorrowRewards(collateralSymbol, account) {
     const tx = new Transaction();
     const accountAddr = account ?? this.sender;
@@ -444,6 +466,43 @@ var VirtueClient = class {
     const rewards = {};
     res.results.map((value, idx) => {
       const rewarder = rewarders[idx];
+      if (value.returnValues) {
+        const [rewardAmount] = value.returnValues;
+        rewards[rewarder.rewardSymbol] = Number(
+          rewardAmount ? bcs.u64().parse(Uint8Array.from(rewardAmount[0])) : "0"
+        );
+      }
+    });
+    return rewards;
+  }
+  /**
+   * @description Get reward amounts from stability pool incentive program
+   */
+  async getStabilityPoolRewards(account) {
+    const tx = new Transaction();
+    const accountAddr = account ?? this.sender;
+    if (!isValidIotaAddress(accountAddr)) {
+      throw new Error("Invalid debtor address");
+    }
+    STABILITY_POOL_REWARDERS.map((rewarder) => {
+      tx.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::realtime_reward_amount`,
+        typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+        arguments: [
+          tx.sharedObjectRef(rewarder),
+          tx.pure.address(accountAddr),
+          tx.sharedObjectRef(CLOCK_OBJ)
+        ]
+      });
+    });
+    const res = await this.iotaClient.devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: accountAddr
+    });
+    if (!res.results) return {};
+    const rewards = {};
+    res.results.map((value, idx) => {
+      const rewarder = STABILITY_POOL_REWARDERS[idx];
       if (value.returnValues) {
         const [rewardAmount] = value.returnValues;
         rewards[rewarder.rewardSymbol] = Number(
@@ -693,40 +752,38 @@ var VirtueClient = class {
     const vaultObj = this.transaction.sharedObjectRef(vault);
     const collateralType = COIN_TYPES[collateralSymbol];
     const rewarders = VAULT_MAP[collateralSymbol].rewarders;
-    if (rewarders) {
-      const globalConfigObj = this.transaction.sharedObjectRef(
-        INCENTIVE_GLOBAL_CONFIG_OBJ
-      );
-      const registryObj = this.transaction.sharedObjectRef(
-        VAULT_REWARDER_REGISTRY_OBJ
-      );
-      const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
-      const checker = this.transaction.moveCall({
-        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
-        typeArguments: [collateralType],
-        arguments: [registryObj, globalConfigObj, updateResponse]
+    const globalConfigObj = this.transaction.sharedObjectRef(
+      INCENTIVE_GLOBAL_CONFIG_OBJ
+    );
+    const registryObj = this.transaction.sharedObjectRef(
+      VAULT_REWARDER_REGISTRY_OBJ
+    );
+    const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
+    const checker = this.transaction.moveCall({
+      target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
+      typeArguments: [collateralType],
+      arguments: [registryObj, globalConfigObj, updateResponse]
+    });
+    (rewarders ?? []).map((rewarder) => {
+      const rewardType = COIN_TYPES[rewarder.rewardSymbol];
+      this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
+        typeArguments: [collateralType, rewardType],
+        arguments: [
+          checker,
+          globalConfigObj,
+          vaultObj,
+          this.transaction.sharedObjectRef(rewarder),
+          clockObj
+        ]
       });
-      rewarders.map((rewarder) => {
-        const rewardType = COIN_TYPES[rewarder.rewardSymbol];
-        this.transaction.moveCall({
-          target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
-          typeArguments: [collateralType, rewardType],
-          arguments: [
-            checker,
-            globalConfigObj,
-            vaultObj,
-            this.transaction.sharedObjectRef(rewarder),
-            clockObj
-          ]
-        });
-      });
-      const [responseAfterIncentive] = this.transaction.moveCall({
-        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
-        typeArguments: [collateralType],
-        arguments: [checker, globalConfigObj]
-      });
-      updateResponse = responseAfterIncentive;
-    }
+    });
+    const [responseAfterIncentive] = this.transaction.moveCall({
+      target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
+      typeArguments: [collateralType],
+      arguments: [checker, globalConfigObj]
+    });
+    updateResponse = responseAfterIncentive;
     this.transaction.moveCall({
       target: `${CDP_PACKAGE_ID}::vault::destroy_response`,
       typeArguments: [COIN_TYPES[collateralSymbol]],
@@ -800,11 +857,42 @@ var VirtueClient = class {
    * @param response: PositionResponse
    */
   checkResponseForStabilityPool(response) {
+    let positionResponse = response;
+    const globalConfigObj = this.transaction.sharedObjectRef(
+      INCENTIVE_GLOBAL_CONFIG_OBJ
+    );
+    const registryObj = this.transaction.sharedObjectRef(
+      VAULT_REWARDER_REGISTRY_OBJ
+    );
+    const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
+    const checker = this.transaction.moveCall({
+      target: `${INCENTIVE_PACKAGE_ID}::stability_pool_incentive::new_checker`,
+      arguments: [registryObj, globalConfigObj, positionResponse]
+    });
+    (STABILITY_POOL_REWARDERS ?? []).map((rewarder) => {
+      const rewardType = COIN_TYPES[rewarder.rewardSymbol];
+      this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::stability_pool_incentive::update`,
+        typeArguments: [rewardType],
+        arguments: [
+          checker,
+          globalConfigObj,
+          this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
+          this.transaction.sharedObjectRef(rewarder),
+          clockObj
+        ]
+      });
+    });
+    const [responseAfterIncentive] = this.transaction.moveCall({
+      target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
+      arguments: [checker, globalConfigObj]
+    });
+    positionResponse = responseAfterIncentive;
     this.transaction.moveCall({
       target: `${STABILITY_POOL_PACKAGE_ID}::stability_pool::check_response`,
       arguments: [
         this.transaction.sharedObjectRef(STABILITY_POOL_OBJ),
-        response
+        positionResponse
       ]
     });
   }
@@ -1016,7 +1104,7 @@ var VirtueClient = class {
     return tx;
   }
   /**
-   * @description claim from stability pool
+   * @description claim the rewards from borrow incentive program
    */
   buildClaimBorrowRewards(inputs) {
     this.resetTransaction();
@@ -1027,7 +1115,9 @@ var VirtueClient = class {
     );
     const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
     Object.keys(VAULT_MAP).map((collSymbol) => {
-      const rewarders = VAULT_MAP[collSymbol].rewarders;
+      const vaultInfo = VAULT_MAP[collSymbol];
+      const rewarders = vaultInfo.rewarders;
+      const vaultObj = this.transaction.sharedObjectRef(vaultInfo.vault);
       if (rewarders) {
         rewarders.map((rewarder) => {
           const [reward] = this.transaction.moveCall({
@@ -1036,6 +1126,7 @@ var VirtueClient = class {
             arguments: [
               this.transaction.sharedObjectRef(rewarder),
               globalConfigObj,
+              vaultObj,
               accountReq,
               clockObj
             ]
@@ -1043,6 +1134,36 @@ var VirtueClient = class {
           this.transaction.transferObjects([reward], this.sender);
         });
       }
+    });
+    const tx = this.getTransaction();
+    this.resetTransaction();
+    return tx;
+  }
+  /**
+   * @description claim the rewards from stability pool incentive program
+   */
+  buildClaimStabilityPoolRewards(inputs) {
+    this.resetTransaction();
+    const { accountObj } = inputs;
+    const [accountReq] = this.newAccountRequest(accountObj);
+    const globalConfigObj = this.transaction.sharedObjectRef(
+      INCENTIVE_GLOBAL_CONFIG_OBJ
+    );
+    const clockObj = this.transaction.sharedObjectRef(CLOCK_OBJ);
+    const stabilityPoolObj = this.transaction.sharedObjectRef(STABILITY_POOL_OBJ);
+    STABILITY_POOL_REWARDERS.map((rewarder) => {
+      const [reward] = this.transaction.moveCall({
+        target: `${INCENTIVE_PACKAGE_ID}::stability_pool_incentive::claim`,
+        typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+        arguments: [
+          this.transaction.sharedObjectRef(rewarder),
+          globalConfigObj,
+          stabilityPoolObj,
+          accountReq,
+          clockObj
+        ]
+      });
+      this.transaction.transferObjects([reward], this.sender);
     });
     const tx = this.getTransaction();
     this.resetTransaction();
@@ -1068,11 +1189,13 @@ export {
   ORIGINAL_STABILITY_POOL_PACKAGE_ID,
   ORIGINAL_VUSD_PACKAGE_ID,
   ObjectContentFields,
+  POOL_REWARDER_REGISTRY_OBJ,
   PYTH_RULE_CONFIG_OBJ,
   PYTH_RULE_PACKAGE_ID,
   PYTH_STATE_ID,
   STABILITY_POOL_OBJ,
   STABILITY_POOL_PACKAGE_ID,
+  STABILITY_POOL_REWARDERS,
   STABILITY_POOL_TABLE_ID,
   TREASURY_OBJ,
   U64FromBytes,
