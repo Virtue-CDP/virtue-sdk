@@ -4,7 +4,7 @@ import { VirtueClient } from "../src/index";
 describe("Interacting with VirtueClient", () => {
   // Instantiate Client
   const walletAddress =
-    "0x659c0adb3242852bbf7684e8c568c4a5eff34bdc6bf5227fdcaccae930da2346";
+    "0x6ff423cb66243ef1fb02dff88aeed580362e2b28f59b92e10b81074b49bea4e1";
   const client = new VirtueClient({ sender: walletAddress });
 
   it("test getAllVaults() function", async () => {
@@ -19,28 +19,45 @@ describe("Interacting with VirtueClient", () => {
     expect(vault).toBeDefined();
   });
 
-  it("test getDebtorPositions() function", async () => {
+  it("test ManagePosition() function", async () => {
     const tx = await client.buildManagePositionTransaction({
       collateralSymbol: "IOTA",
-      depositAmount: "100000000000",
-      borrowAmount: "1000000",
+      depositAmount: "1000000000", // 1 IOTA
+      borrowAmount: "10000", // 0.01 vUSD
       repaymentAmount: "0",
       withdrawAmount: "0",
     });
     expect(tx).toBeDefined();
     tx.setSender(client.sender);
     console.log(
-      client.getIotaClient().dryRunTransactionBlock({
+      await client.getIotaClient().dryRunTransactionBlock({
         transactionBlock: await tx.build({ client: client.getIotaClient() }),
       }),
     );
-  });
+  }, 15000);
 
   it("test getDebtorPositions() function", async () => {
     const positions = await client.getDebtorPositions();
     console.log(positions);
     expect(positions).toBeDefined();
   });
+
+  it("test emitDepositPoint() function", async () => {
+    const tx = await client.buildManagePositionTransaction({
+      collateralSymbol: "stIOTA",
+      depositAmount: "1000000000", // 1 stIOTA
+      borrowAmount: "10000", // 0.01 vUSD
+      repaymentAmount: "0",
+      withdrawAmount: "0",
+    });
+    expect(tx).toBeDefined();
+    tx.setSender(client.sender);
+    console.log(
+      await client.getIotaClient().dryRunTransactionBlock({
+        transactionBlock: await tx.build({ client: client.getIotaClient() }),
+      }),
+    );
+  }, 15000);
 
   // it("test getStabilityBalances() function", async () => {
   //   const balances = await client.getStabilityPoolBalances(walletAddress);
