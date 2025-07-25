@@ -12,10 +12,15 @@ import {
   CERT_RULE_PACKAGE_ID,
   CLOCK_OBJ,
   COIN_TYPES,
+  DEPOSIT_POINT_BONUS_COIN,
   FRAMEWORK_PACKAGE_ID,
   INCENTIVE_GLOBAL_CONFIG_OBJ,
   INCENTIVE_PACKAGE_ID,
+  isDepositPointBonusCoin,
   ORACLE_PACKAGE_ID,
+  POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF,
+  POINT_HANDLER_MAP,
+  POINT_PACKAGE_ID,
   POOL_REWARDER_REGISTRY_OBJ,
   PYTH_RULE_CONFIG_OBJ,
   PYTH_RULE_PACKAGE_ID,
@@ -880,6 +885,10 @@ export class VirtueClient {
         updateRequest,
         priceResult,
       });
+      // emit point
+      if (isDepositPointBonusCoin(collateralSymbol))
+        this.emitPointForDepositAction(collateralSymbol, response);
+
       this.checkResponse({ collateralSymbol, response });
       if (Number(withdrawAmount) > 0) {
         this.transaction.transferObjects([collCoin], recipient ?? this.sender);
@@ -923,6 +932,10 @@ export class VirtueClient {
         collateralSymbol,
         updateRequest,
       });
+      // emit point
+      if (isDepositPointBonusCoin(collateralSymbol))
+        this.emitPointForDepositAction(collateralSymbol, response);
+
       this.checkResponse({ collateralSymbol, response });
       this.transaction.moveCall({
         target: "0x2::coin::destroy_zero",
@@ -980,6 +993,10 @@ export class VirtueClient {
       collateralSymbol,
       updateRequest,
     });
+    // emit point
+    if (isDepositPointBonusCoin(collateralSymbol))
+      this.emitPointForDepositAction(collateralSymbol, response);
+
     this.checkResponse({ collateralSymbol, response });
     this.transaction.moveCall({
       target: "0x2::coin::destroy_zero",
@@ -1130,5 +1147,25 @@ export class VirtueClient {
     const tx = this.getTransaction();
     this.resetTransaction();
     return tx;
+  }
+
+  /**
+   * @description instruction for emitting point request
+   */
+  emitPointForDepositAction(
+    collateralSymbol: DEPOSIT_POINT_BONUS_COIN,
+    response: TransactionArgument,
+  ) {
+    this.transaction.moveCall({
+      target: `${POINT_PACKAGE_ID}::point::emit_point_for_deposit_action`,
+      typeArguments: [COIN_TYPES[collateralSymbol]],
+      arguments: [
+        this.transaction.sharedObjectRef(POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF),
+        this.transaction.sharedObjectRef(POINT_HANDLER_MAP[collateralSymbol]),
+        this.transaction.sharedObjectRef(VAULT_MAP[collateralSymbol].vault),
+        response,
+        this.transaction.object.clock(),
+      ],
+    });
   }
 }
