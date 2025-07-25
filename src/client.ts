@@ -282,14 +282,14 @@ export class VirtueClient {
     collateralSymbol: COLLATERAL_COIN,
     account?: string,
   ): Promise<Rewards> {
-    const tx = new Transaction();
     const accountAddr = account ?? this.sender;
     if (!isValidIotaAddress(accountAddr)) {
       throw new Error("Invalid debtor address");
     }
+    const tx = new Transaction();
     const vaultInfo = VAULT_MAP[collateralSymbol];
     const rewarders = vaultInfo.rewarders;
-    const vaultObj = this.transaction.sharedObjectRef(vaultInfo.vault);
+    const vaultObj = tx.sharedObjectRef(vaultInfo.vault);
     if (!rewarders) return {};
     rewarders.map((rewarder) => {
       tx.moveCall({
@@ -310,12 +310,12 @@ export class VirtueClient {
       transactionBlock: tx,
       sender: accountAddr,
     });
+    console.log(res.results);
     if (!res.results) return {};
-
     const rewards: Rewards = {};
     res.results.map((value, idx) => {
       const rewarder = rewarders[idx];
-      if (value.returnValues) {
+      if (rewarder && value.returnValues) {
         const [rewardAmount] = value.returnValues;
         rewards[rewarder.rewardSymbol] = Number(
           rewardAmount

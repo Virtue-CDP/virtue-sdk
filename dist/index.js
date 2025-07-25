@@ -440,14 +440,14 @@ var VirtueClient = class {
    * @description Get reward amounts from borrow incentive program
    */
   async getBorrowRewards(collateralSymbol, account) {
-    const tx = new (0, _transactions.Transaction)();
     const accountAddr = _nullishCoalesce(account, () => ( this.sender));
     if (!_utils.isValidIotaAddress.call(void 0, accountAddr)) {
       throw new Error("Invalid debtor address");
     }
+    const tx = new (0, _transactions.Transaction)();
     const vaultInfo = VAULT_MAP[collateralSymbol];
     const rewarders = vaultInfo.rewarders;
-    const vaultObj = this.transaction.sharedObjectRef(vaultInfo.vault);
+    const vaultObj = tx.sharedObjectRef(vaultInfo.vault);
     if (!rewarders) return {};
     rewarders.map((rewarder) => {
       tx.moveCall({
@@ -468,11 +468,12 @@ var VirtueClient = class {
       transactionBlock: tx,
       sender: accountAddr
     });
+    console.log(res.results);
     if (!res.results) return {};
     const rewards = {};
     res.results.map((value, idx) => {
       const rewarder = rewarders[idx];
-      if (value.returnValues) {
+      if (rewarder && value.returnValues) {
         const [rewardAmount] = value.returnValues;
         rewards[rewarder.rewardSymbol] = Number(
           rewardAmount ? _bcs.bcs.u64().parse(Uint8Array.from(rewardAmount[0])) : "0"
