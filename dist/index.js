@@ -452,7 +452,10 @@ var VirtueClient = class {
     rewarders.map((rewarder) => {
       tx.moveCall({
         target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::realtime_reward_amount`,
-        typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+        typeArguments: [
+          COIN_TYPES[collateralSymbol],
+          COIN_TYPES[rewarder.rewardSymbol]
+        ],
         arguments: [
           tx.sharedObjectRef(rewarder),
           vaultObj,
@@ -489,7 +492,7 @@ var VirtueClient = class {
     }
     STABILITY_POOL_REWARDERS.map((rewarder) => {
       tx.moveCall({
-        target: `${INCENTIVE_PACKAGE_ID}::borrow_incentive::realtime_reward_amount`,
+        target: `${INCENTIVE_PACKAGE_ID}::stability_pool_incentive::realtime_reward_amount`,
         typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           tx.sharedObjectRef(rewarder),
