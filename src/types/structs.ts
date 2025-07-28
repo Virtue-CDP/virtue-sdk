@@ -29,3 +29,24 @@ export type StabilityPoolInfo = {
 };
 
 export type Rewards = Partial<Record<COIN, number>>;
+
+export type SharedObjectRef = {
+  objectId: string;
+  mutable: boolean;
+  initialSharedVersion: number;
+};
+
+export type RewarderInfo = {
+  rewarder: SharedObjectRef;
+  rewardSymbol: COIN;
+};
+
+export type VaultObjectInfo = {
+  // symbol: COIN;
+  priceAggregater: SharedObjectRef;
+  vault: SharedObjectRef;
+  pythPriceId?: string;
+  rewarders?: Rewarder[];
+};
+
+export type Rewarder = SharedObjectRef & { rewardSymbol: COIN };
