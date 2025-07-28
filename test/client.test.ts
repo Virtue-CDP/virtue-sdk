@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { VirtueClient } from "../src/index";
+import { POINT_PACKAGE_ID, VirtueClient } from "../src/index";
 
 describe("Interacting with VirtueClient", () => {
   // Instantiate Client
@@ -52,11 +52,21 @@ describe("Interacting with VirtueClient", () => {
     });
     expect(tx).toBeDefined();
     tx.setSender(client.sender);
-    console.log(
-      await client.getIotaClient().dryRunTransactionBlock({
-        transactionBlock: await tx.build({ client: client.getIotaClient() }),
-      }),
-    );
+    const dryRunResponse = await client.getIotaClient().dryRunTransactionBlock({
+      transactionBlock: await tx.build({ client: client.getIotaClient() }),
+    });
+
+    const LIQUIDLINK_STAKE_POINT_EVENT_PREFIX =
+      "0x249dd22d5d65bd74d1427061620a3b4143e6c61b21375d841761eb71630ea1ff::point::LiquidlinkStakePointEvent";
+
+    expect(
+      dryRunResponse.events.some(
+        (e) =>
+          e.type ==
+          LIQUIDLINK_STAKE_POINT_EVENT_PREFIX +
+            `<${POINT_PACKAGE_ID}::point::VirtuePointWitness>`,
+      ),
+    ).toBeTruthy();
   }, 15000);
 
   // it("test getStabilityBalances() function", async () => {

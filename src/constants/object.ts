@@ -15,7 +15,7 @@ export const ORIGINAL_STABILITY_POOL_PACKAGE_ID =
 export const ORIGINAL_INCENTIVE_PACKAGE_ID =
   "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019";
 export const ORIGINAL_POINT_PACKAGE_ID =
-  "0x9fc559d747bd642797e65960c4b362a3a5b326261c1fdcfaecef0af43eb2533d";
+  "0xa8a0ec490364d553917d00f734dbe700c6c2d896dc6a108f07ca571eb7d1eb78";
 
 /// Latest Package IDs
 
@@ -32,7 +32,7 @@ export const STABILITY_POOL_PACKAGE_ID =
 export const INCENTIVE_PACKAGE_ID =
   "0x12d5c2472d63a22f32ed632c13682afd29f81e67e271a73253392e2a5bf0dc90";
 export const POINT_PACKAGE_ID =
-  "0x9fc559d747bd642797e65960c4b362a3a5b326261c1fdcfaecef0af43eb2533d";
+  "0xa8a0ec490364d553917d00f734dbe700c6c2d896dc6a108f07ca571eb7d1eb78";
 
 /// Shared Objects
 
@@ -184,16 +184,19 @@ export const STABILITY_POOL_REWARDERS: Rewarder[] = [
 
 // Point
 export const POINT_PACKAGE_ADMIN_CAP_OBJECT_ID: string =
-  "0x1182cef3f954d5606baf47961153d51d65fc29fae3e23d16807917dbffe95578";
-export const POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF:SharedObjectRef= {
-    objectId: "0x2e0723405bf58562a4befe8a142cdaf495615b63c4afaf46c498e7936377f5d9",
-    mutable: false,
-    initialSharedVersion: 105637632
-}
+  "0xeb8577f77407b74523a387c7035939e00a37adce0b3deb7aec9a107b8cae4747";
+export const POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF: SharedObjectRef = {
+  objectId:
+    "0x4ce06a4e555f89c4253f95f7111113daf47aa6620ace85366eb7a1ce35a93647",
+  mutable: false,
+  initialSharedVersion: 105637634,
+};
 
 export type DEPOSIT_POINT_BONUS_COIN = Extract<COIN, "stIOTA">;
 
-export function isDepositPointBonusCoin(coin: COIN): coin is DEPOSIT_POINT_BONUS_COIN {
+export function isDepositPointBonusCoin(
+  coin: COIN,
+): coin is DEPOSIT_POINT_BONUS_COIN {
   return coin === "stIOTA";
 }
 
@@ -203,8 +206,8 @@ export const POINT_HANDLER_MAP: Record<
 > = {
   stIOTA: {
     objectId:
-      "0x31efa0904ddb83686637fc62bacbc61e6c8f537f5a1d3a8f8f8fde35019166f0",
+      "0x7ea82696a006f512841eb0af88935ea1ac1b962bd16e8b4561ac9629836f93bc",
     mutable: false,
-    initialSharedVersion: 105637633,
+    initialSharedVersion: 105637635,
   },
 };
