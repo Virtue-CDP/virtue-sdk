@@ -57,7 +57,7 @@ describe("Interacting with VirtueClient", () => {
     });
 
     const LIQUIDLINK_STAKE_POINT_EVENT_PREFIX =
-      "0x249dd22d5d65bd74d1427061620a3b4143e6c61b21375d841761eb71630ea1ff::point::LiquidlinkStakePointEvent";
+      "0x12fc1744dbd2401a0bbc1cb07995e1d7b2d9179a42a90ae7311e4c477112bf83::point::LiquidlinkStakePointEvent";
 
     expect(
       dryRunResponse.events.some(

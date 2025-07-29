@@ -66,7 +66,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     ORIGINAL_INCENTIVE_PACKAGE_ID:
       "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019",
     ORIGINAL_POINT_PACKAGE_ID:
-      "0xa8a0ec490364d553917d00f734dbe700c6c2d896dc6a108f07ca571eb7d1eb78",
+      "0x745a1c670fd04d9e71b43a3593a855c79af5e6aa6979d1029f35ec9baa344c1e",
 
     FRAMEWORK_PACKAGE_ID:
       "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b",
@@ -81,7 +81,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     INCENTIVE_PACKAGE_ID:
       "0x12d5c2472d63a22f32ed632c13682afd29f81e67e271a73253392e2a5bf0dc90",
     POINT_PACKAGE_ID:
-      "0xa8a0ec490364d553917d00f734dbe700c6c2d896dc6a108f07ca571eb7d1eb78",
+      "0x745a1c670fd04d9e71b43a3593a855c79af5e6aa6979d1029f35ec9baa344c1e",
 
     CLOCK_OBJ: {
       objectId:
@@ -150,19 +150,19 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       mutable: false,
     },
     POINT_PACKAGE_ADMIN_CAP_OBJECT_ID:
-      "0xeb8577f77407b74523a387c7035939e00a37adce0b3deb7aec9a107b8cae4747",
+      "0x2bc471bd479eac37891f3ad6641142960478d6f1724a038e2fe56f7fd28e0091",
     POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF: {
       objectId:
-        "0x4ce06a4e555f89c4253f95f7111113daf47aa6620ace85366eb7a1ce35a93647",
+        "0x86f95e88bcc50edbd930153079db969e92f050c887d7d4b4642a08cbb04d8787",
       mutable: false,
-      initialSharedVersion: 105637634,
+      initialSharedVersion: 126182186,
     },
     POINT_HANDLER_MAP: {
       stIOTA: {
         objectId:
-          "0x7ea82696a006f512841eb0af88935ea1ac1b962bd16e8b4561ac9629836f93bc",
+          "0xcd096080bca84ea1c60dfe2b8efcad1eceb41acbe69de1c71f867dd2d3b51dd1",
         mutable: false,
-        initialSharedVersion: 105637635,
+        initialSharedVersion: 126182187,
       },
     },
     STABILITY_POOL_TABLE_ID:
