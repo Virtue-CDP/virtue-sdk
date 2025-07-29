@@ -1,5 +1,5 @@
-import { COIN, COLLATERAL_COIN } from "@/types";
-import { COIN_TYPES, ORIGINAL_ORACLE_PACKAGE_ID } from "@/constants";
+import { COIN } from "@/types";
+import { COIN_TYPES } from "@/constants";
 import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
 
 export function getObjectNames(objectTypes: string[]) {
@@ -105,8 +105,4 @@ export const parseUnits = (value: number | string, decimals: number) => {
   }
 
   return BigInt(`${negative ? "-" : ""}${integer}${fraction}`);
-};
-
-export const getPriceResultType = (coinSymbol: COLLATERAL_COIN): string => {
-  return `${ORIGINAL_ORACLE_PACKAGE_ID}::result::PriceResult<${COIN_TYPES[coinSymbol]}>`;
 };

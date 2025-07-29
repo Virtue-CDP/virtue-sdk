@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { POINT_PACKAGE_ID, VirtueClient } from "../src/index";
+import { VirtueClient } from "../src/index";
 
 describe("Interacting with VirtueClient", () => {
   // Instantiate Client
@@ -64,7 +64,7 @@ describe("Interacting with VirtueClient", () => {
         (e) =>
           e.type ==
           LIQUIDLINK_STAKE_POINT_EVENT_PREFIX +
-            `<${POINT_PACKAGE_ID}::point::VirtuePointWitness>`,
+            `<${client.config.POINT_PACKAGE_ID}::point::VirtuePointWitness>`,
       ),
     ).toBeTruthy();
   }, 15000);
