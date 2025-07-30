@@ -79,7 +79,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     STABILITY_POOL_PACKAGE_ID:
       "0xb80b111f3dfb35ea26bd288e187af349c4e5b74a5fda143066f5ff9de84f34bf",
     INCENTIVE_PACKAGE_ID:
-      "0xf9f7c4296bb7f7b2d50cc668239715b87ee7700e8208a87581c0e758e9bde4d8",
+      "0xee096055d78c773fb34b6fa22c16e1560f9a93713308045489e781e7a299b03e",
     POINT_PACKAGE_ID:
       "0x745a1c670fd04d9e71b43a3593a855c79af5e6aa6979d1029f35ec9baa344c1e",
 
