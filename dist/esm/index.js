@@ -1259,6 +1259,8 @@ var VirtueClient = class {
   buildClaimBorrowRewards(inputs) {
     const { accountObj, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
       this.config.INCENTIVE_GLOBAL_CONFIG_OBJ
@@ -1298,6 +1300,8 @@ var VirtueClient = class {
   buildClaimStabilityPoolRewards(inputs) {
     const { accountObj, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
       this.config.INCENTIVE_GLOBAL_CONFIG_OBJ
