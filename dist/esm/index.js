@@ -5,11 +5,6 @@ import {
 import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
 
 // src/constants/coin.ts
-var COIN_TYPES = {
-  IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
-  stIOTA: "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
-  VUSD: "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f::vusd::VUSD"
-};
 var COIN_DECIMALS = {
   IOTA: 9,
   stIOTA: 9,
@@ -263,9 +258,9 @@ function isDepositPointBonusCoin(coin) {
 
 // src/utils/format.ts
 import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
-function getObjectNames(objectTypes) {
-  const accept_coin_type = Object.values(COIN_TYPES);
-  const accept_coin_name = Object.keys(COIN_TYPES);
+function getObjectNames(objectTypes, coinTypes) {
+  const accept_coin_type = Object.values(coinTypes);
+  const accept_coin_name = Object.keys(coinTypes);
   const coinTypeList = objectTypes.map(
     (type) => type.split("<").pop()?.replace(">", "") ?? ""
   );
@@ -277,18 +272,18 @@ function getObjectNames(objectTypes) {
   });
   return objectNameList;
 }
-var getCoinType = (str) => {
+var getCoinType = (str, coinTypes) => {
   const startIndex = str.indexOf("<");
   const endIndex = str.lastIndexOf(">");
   if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
     const coinType = str.slice(startIndex + 1, endIndex);
-    return coinType === "0x2::iota::IOTA" ? COIN_TYPES.IOTA : coinType;
+    return coinType === "0x2::iota::IOTA" ? coinTypes.IOTA : coinType;
   }
   return null;
 };
-var getCoinSymbol = (coinType) => {
-  const coin = Object.keys(COIN_TYPES).find(
-    (key) => normalizeIotaAddress(COIN_TYPES[key]) === normalizeIotaAddress(coinType)
+var getCoinSymbol = (coinType, coinTypes) => {
+  const coin = Object.keys(coinTypes).find(
+    (key) => normalizeIotaAddress(coinTypes[key]) === normalizeIotaAddress(coinType)
   );
   if (coin) {
     return coin;
@@ -1376,7 +1371,6 @@ var VirtueClient = class {
 };
 export {
   COIN_DECIMALS,
-  COIN_TYPES,
   CONFIG,
   ObjectContentFields,
   U64FromBytes,

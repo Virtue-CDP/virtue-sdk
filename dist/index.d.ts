@@ -85,7 +85,6 @@ type Rewarder = SharedObjectRef & {
     rewardSymbol: COIN;
 };
 
-declare const COIN_TYPES: Record<COIN, string>;
 declare const COIN_DECIMALS: Record<COIN, number>;
 
 type ConfigType = {
@@ -381,9 +380,9 @@ declare class VirtueClient {
     emitPointForDepositAction(collateralSymbol: DEPOSIT_POINT_BONUS_COIN, response: TransactionArgument): void;
 }
 
-declare function getObjectNames(objectTypes: string[]): string[];
-declare const getCoinType: (str: string) => string | null;
-declare const getCoinSymbol: (coinType: string) => COIN | undefined;
+declare function getObjectNames(objectTypes: string[], coinTypes: Record<COIN, string>): string[];
+declare const getCoinType: (str: string, coinTypes: Record<COIN, string>) => string | null;
+declare const getCoinSymbol: (coinType: string, coinTypes: Record<COIN, string>) => COIN | undefined;
 declare function U64FromBytes(x: number[]): bigint;
 declare const formatUnits: (value: bigint, decimals: number) => string;
 declare const formatBigInt: (value: string, decimals?: number) => number;
@@ -401,4 +400,4 @@ declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
 
-export { type COIN, COIN_DECIMALS, COIN_TYPES, type COLLATERAL_COIN, CONFIG, type ConfigType, type DEPOSIT_POINT_BONUS_COIN, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PositionInfo, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, isDepositPointBonusCoin, parseUnits, parseVaultObject };
+export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type ConfigType, type DEPOSIT_POINT_BONUS_COIN, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PositionInfo, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, isDepositPointBonusCoin, parseUnits, parseVaultObject };

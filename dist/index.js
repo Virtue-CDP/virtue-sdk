@@ -5,11 +5,6 @@ var _transactions = require('@iota/iota-sdk/transactions');
 var _client = require('@iota/iota-sdk/client');
 
 // src/constants/coin.ts
-var COIN_TYPES = {
-  IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
-  stIOTA: "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
-  VUSD: "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f::vusd::VUSD"
-};
 var COIN_DECIMALS = {
   IOTA: 9,
   stIOTA: 9,
@@ -263,9 +258,9 @@ function isDepositPointBonusCoin(coin) {
 
 // src/utils/format.ts
 var _utils = require('@iota/iota-sdk/utils');
-function getObjectNames(objectTypes) {
-  const accept_coin_type = Object.values(COIN_TYPES);
-  const accept_coin_name = Object.keys(COIN_TYPES);
+function getObjectNames(objectTypes, coinTypes) {
+  const accept_coin_type = Object.values(coinTypes);
+  const accept_coin_name = Object.keys(coinTypes);
   const coinTypeList = objectTypes.map(
     (type) => _nullishCoalesce(_optionalChain([type, 'access', _ => _.split, 'call', _2 => _2("<"), 'access', _3 => _3.pop, 'call', _4 => _4(), 'optionalAccess', _5 => _5.replace, 'call', _6 => _6(">", "")]), () => ( ""))
   );
@@ -277,18 +272,18 @@ function getObjectNames(objectTypes) {
   });
   return objectNameList;
 }
-var getCoinType = (str) => {
+var getCoinType = (str, coinTypes) => {
   const startIndex = str.indexOf("<");
   const endIndex = str.lastIndexOf(">");
   if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
     const coinType = str.slice(startIndex + 1, endIndex);
-    return coinType === "0x2::iota::IOTA" ? COIN_TYPES.IOTA : coinType;
+    return coinType === "0x2::iota::IOTA" ? coinTypes.IOTA : coinType;
   }
   return null;
 };
-var getCoinSymbol = (coinType) => {
-  const coin = Object.keys(COIN_TYPES).find(
-    (key) => _utils.normalizeIotaAddress.call(void 0, COIN_TYPES[key]) === _utils.normalizeIotaAddress.call(void 0, coinType)
+var getCoinSymbol = (coinType, coinTypes) => {
+  const coin = Object.keys(coinTypes).find(
+    (key) => _utils.normalizeIotaAddress.call(void 0, coinTypes[key]) === _utils.normalizeIotaAddress.call(void 0, coinType)
   );
   if (coin) {
     return coin;
@@ -1392,6 +1387,5 @@ var VirtueClient = class {
 
 
 
-
-exports.COIN_DECIMALS = COIN_DECIMALS; exports.COIN_TYPES = COIN_TYPES; exports.CONFIG = CONFIG; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.isDepositPointBonusCoin = isDepositPointBonusCoin; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
+exports.COIN_DECIMALS = COIN_DECIMALS; exports.CONFIG = CONFIG; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.isDepositPointBonusCoin = isDepositPointBonusCoin; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
 //# sourceMappingURL=index.js.map
