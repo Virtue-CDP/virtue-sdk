@@ -341,7 +341,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           mutable: true,
         },
         pythPriceId:
-          "0x570b0d8b1874762f45775332a23e7c153c0db9cd77e574ae5f698453a26ca593",
+          "0xc7b72e5d860034288c9335d4d325da4272fe50c92ab72249d58f6cbba30e4c44",
       },
       stIOTA: {
         priceAggregater: {
