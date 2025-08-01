@@ -644,40 +644,42 @@ export class VirtueClient {
     let updateResponse = response;
     const vault = this.config.VAULT_MAP[collateralSymbol].vault;
     const vaultObj = this.transaction.sharedObjectRef(vault);
-    const collateralType = COIN_TYPES[collateralSymbol];
-    const rewarders = this.config.VAULT_MAP[collateralSymbol].rewarders;
-    const globalConfigObj = this.transaction.sharedObjectRef(
-      this.config.INCENTIVE_GLOBAL_CONFIG_OBJ,
-    );
-    const registryObj = this.transaction.sharedObjectRef(
-      this.config.VAULT_REWARDER_REGISTRY_OBJ,
-    );
-    const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
-    const checker = this.transaction.moveCall({
-      target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
-      typeArguments: [collateralType],
-      arguments: [registryObj, globalConfigObj, updateResponse],
-    });
-    (rewarders ?? []).map((rewarder) => {
-      const rewardType = COIN_TYPES[rewarder.rewardSymbol];
-      this.transaction.moveCall({
-        target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
-        typeArguments: [collateralType, rewardType],
-        arguments: [
-          checker,
-          globalConfigObj,
-          vaultObj,
-          this.transaction.sharedObjectRef(rewarder),
-          clockObj,
-        ],
+    if (this.config.INCENTIVE_PACKAGE_ID) {
+      const collateralType = COIN_TYPES[collateralSymbol];
+      const rewarders = this.config.VAULT_MAP[collateralSymbol].rewarders;
+      const globalConfigObj = this.transaction.sharedObjectRef(
+        this.config.INCENTIVE_GLOBAL_CONFIG_OBJ,
+      );
+      const registryObj = this.transaction.sharedObjectRef(
+        this.config.VAULT_REWARDER_REGISTRY_OBJ,
+      );
+      const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
+      const checker = this.transaction.moveCall({
+        target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
+        typeArguments: [collateralType],
+        arguments: [registryObj, globalConfigObj, updateResponse],
       });
-    });
-    const [responseAfterIncentive] = this.transaction.moveCall({
-      target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
-      typeArguments: [collateralType],
-      arguments: [checker, globalConfigObj],
-    });
-    updateResponse = responseAfterIncentive;
+      (rewarders ?? []).map((rewarder) => {
+        const rewardType = COIN_TYPES[rewarder.rewardSymbol];
+        this.transaction.moveCall({
+          target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
+          typeArguments: [collateralType, rewardType],
+          arguments: [
+            checker,
+            globalConfigObj,
+            vaultObj,
+            this.transaction.sharedObjectRef(rewarder),
+            clockObj,
+          ],
+        });
+      });
+      const [responseAfterIncentive] = this.transaction.moveCall({
+        target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
+        typeArguments: [collateralType],
+        arguments: [checker, globalConfigObj],
+      });
+      updateResponse = responseAfterIncentive;
+    }
     this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::vault::destroy_response`,
       typeArguments: [COIN_TYPES[collateralSymbol]],
@@ -1074,6 +1076,9 @@ export class VirtueClient {
     const { accountObj, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
+    if (!this.config.INCENTIVE_PACKAGE_ID) {
+      throw new Error("No rewards to claim");
+    }
     this.transaction.setSender(this.sender);
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
@@ -1119,6 +1124,9 @@ export class VirtueClient {
     const { accountObj, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
+    if (!this.config.INCENTIVE_PACKAGE_ID) {
+      throw new Error("No rewards to claim");
+    }
     this.transaction.setSender(this.sender);
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
@@ -1168,22 +1176,24 @@ export class VirtueClient {
     collateralSymbol: DEPOSIT_POINT_BONUS_COIN,
     response: TransactionArgument,
   ) {
-    this.transaction.moveCall({
-      target: `${this.config.POINT_PACKAGE_ID}::point::emit_point_for_deposit_action`,
-      typeArguments: [COIN_TYPES[collateralSymbol]],
-      arguments: [
-        this.transaction.sharedObjectRef(
-          this.config.POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF,
-        ),
-        this.transaction.sharedObjectRef(
-          this.config.POINT_HANDLER_MAP[collateralSymbol],
-        ),
-        this.transaction.sharedObjectRef(
-          this.config.VAULT_MAP[collateralSymbol].vault,
-        ),
-        response,
-        this.transaction.object.clock(),
-      ],
-    });
+    if (this.config.POINT_PACKAGE_ID) {
+      this.transaction.moveCall({
+        target: `${this.config.POINT_PACKAGE_ID}::point::emit_point_for_deposit_action`,
+        typeArguments: [COIN_TYPES[collateralSymbol]],
+        arguments: [
+          this.transaction.sharedObjectRef(
+            this.config.POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF,
+          ),
+          this.transaction.sharedObjectRef(
+            this.config.POINT_HANDLER_MAP[collateralSymbol],
+          ),
+          this.transaction.sharedObjectRef(
+            this.config.VAULT_MAP[collateralSymbol].vault,
+          ),
+          response,
+          this.transaction.object.clock(),
+        ],
+      });
+    }
   }
 }
