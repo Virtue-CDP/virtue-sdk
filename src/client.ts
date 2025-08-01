@@ -5,7 +5,7 @@ import {
 } from "@iota/iota-sdk/transactions";
 import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
 
-import { COIN_TYPES, CONFIG, ConfigType } from "@/constants";
+import { CONFIG, ConfigType } from "@/constants";
 import {
   VaultInfo,
   VaultResponse,
@@ -27,9 +27,9 @@ import {
 import { bcs } from "@iota/iota-sdk/bcs";
 import { isValidIotaAddress } from "@iota/iota-sdk/utils";
 
-const getCoinSymbol = (coinType: string) => {
-  const coin = Object.keys(COIN_TYPES).find(
-    (key) => COIN_TYPES[key as COIN] === coinType,
+const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
+  const coin = Object.keys(coinTypes).find(
+    (key) => coinTypes[key as COIN] === coinType,
   );
   if (coin) {
     return coin as COIN;
@@ -162,7 +162,7 @@ export class VirtueClient {
     tokenList.map((token) => {
       tx.moveCall({
         target: `${this.config.CDP_PACKAGE_ID}::vault::try_get_position_data`,
-        typeArguments: [COIN_TYPES[token]],
+        typeArguments: [this.config.COIN_TYPES[token]],
         arguments: [
           tx.sharedObjectRef(this.config.VAULT_MAP[token].vault),
           tx.pure.address(debtorAddr),
@@ -251,7 +251,7 @@ export class VirtueClient {
       .contents as any[];
     vecMap.map((info) => {
       const coinType = "0x" + info.fields.key.fields.name;
-      const coinSymbol = getCoinSymbol(coinType);
+      const coinSymbol = getCoinSymbol(coinType, this.config.COIN_TYPES);
       if (coinSymbol) {
         const collBalance = info.fields.value.fields.value;
         collBalances[coinSymbol as COLLATERAL_COIN] = +collBalance;
@@ -280,8 +280,8 @@ export class VirtueClient {
       tx.moveCall({
         target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::realtime_reward_amount`,
         typeArguments: [
-          COIN_TYPES[collateralSymbol],
-          COIN_TYPES[rewarder.rewardSymbol],
+          this.config.COIN_TYPES[collateralSymbol],
+          this.config.COIN_TYPES[rewarder.rewardSymbol],
         ],
         arguments: [
           tx.sharedObjectRef(rewarder),
@@ -324,7 +324,7 @@ export class VirtueClient {
     this.config.STABILITY_POOL_REWARDERS.map((rewarder) => {
       tx.moveCall({
         target: `${this.config.INCENTIVE_PACKAGE_ID}::stability_pool_incentive::realtime_reward_amount`,
-        typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+        typeArguments: [this.config.COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           tx.sharedObjectRef(rewarder),
           tx.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
@@ -362,7 +362,7 @@ export class VirtueClient {
   zeroCoin(coinSymbol: COIN): TransactionResult {
     return this.transaction.moveCall({
       target: "0x2::coin::zero",
-      typeArguments: [COIN_TYPES[coinSymbol]],
+      typeArguments: [this.config.COIN_TYPES[coinSymbol]],
     });
   }
 
@@ -390,7 +390,7 @@ export class VirtueClient {
           ),
         );
       } else {
-        const coinType = COIN_TYPES[coinSymbol];
+        const coinType = this.config.COIN_TYPES[coinSymbol];
         const { data: userCoins } = await this.iotaClient.getCoins({
           owner: this.sender,
           coinType,
@@ -477,7 +477,7 @@ export class VirtueClient {
   newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionResult {
     return this.transaction.moveCall({
       target: `${this.config.ORACLE_PACKAGE_ID}::collector::new`,
-      typeArguments: [COIN_TYPES[collateralSymbol]],
+      typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
     });
   }
 
@@ -490,7 +490,7 @@ export class VirtueClient {
     collateralSymbol: COLLATERAL_COIN,
   ): Promise<TransactionResult> {
     const [collector] = this.newPriceCollector(collateralSymbol);
-    const coinType = COIN_TYPES[collateralSymbol];
+    const coinType = this.config.COIN_TYPES[collateralSymbol];
     const vaultInfo = this.config.VAULT_MAP[collateralSymbol];
     if (vaultInfo.pythPriceId) {
       const updateData = await this.pythConnection.getPriceFeedsUpdateData([
@@ -534,7 +534,7 @@ export class VirtueClient {
       });
       return this.transaction.moveCall({
         target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
-        typeArguments: [COIN_TYPES.stIOTA],
+        typeArguments: [this.config.COIN_TYPES.stIOTA],
         arguments: [
           this.transaction.sharedObjectRef(vaultInfo.priceAggregater),
           collector,
@@ -571,7 +571,7 @@ export class VirtueClient {
       withdrawAmount,
       accountObj,
     } = inputs;
-    const coinType = COIN_TYPES[collateralSymbol];
+    const coinType = this.config.COIN_TYPES[collateralSymbol];
     const vaultId = this.config.VAULT_MAP[collateralSymbol].vault.objectId;
     const [accountReq] = this.newAccountRequest(accountObj);
     return this.transaction.moveCall({
@@ -607,7 +607,7 @@ export class VirtueClient {
   }): TransactionResult {
     const { collateralSymbol, updateRequest, priceResult } = inputs;
     const vault = this.config.VAULT_MAP[collateralSymbol].vault;
-    const priceResultType = `${this.config.ORIGINAL_ORACLE_PACKAGE_ID}::result::PriceResult<${COIN_TYPES[collateralSymbol]}>`;
+    const priceResultType = `${this.config.ORIGINAL_ORACLE_PACKAGE_ID}::result::PriceResult<${this.config.COIN_TYPES[collateralSymbol]}>`;
     const priceResultOpt = priceResult
       ? this.transaction.moveCall({
           target: `0x1::option::some`,
@@ -620,7 +620,7 @@ export class VirtueClient {
         });
     return this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::vault::update_position`,
-      typeArguments: [COIN_TYPES[collateralSymbol]],
+      typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
       arguments: [
         this.transaction.sharedObjectRef(vault),
         this.transaction.sharedObjectRef(this.config.TREASURY_OBJ),
@@ -644,43 +644,45 @@ export class VirtueClient {
     let updateResponse = response;
     const vault = this.config.VAULT_MAP[collateralSymbol].vault;
     const vaultObj = this.transaction.sharedObjectRef(vault);
-    const collateralType = COIN_TYPES[collateralSymbol];
-    const rewarders = this.config.VAULT_MAP[collateralSymbol].rewarders;
-    const globalConfigObj = this.transaction.sharedObjectRef(
-      this.config.INCENTIVE_GLOBAL_CONFIG_OBJ,
-    );
-    const registryObj = this.transaction.sharedObjectRef(
-      this.config.VAULT_REWARDER_REGISTRY_OBJ,
-    );
-    const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
-    const checker = this.transaction.moveCall({
-      target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
-      typeArguments: [collateralType],
-      arguments: [registryObj, globalConfigObj, updateResponse],
-    });
-    (rewarders ?? []).map((rewarder) => {
-      const rewardType = COIN_TYPES[rewarder.rewardSymbol];
-      this.transaction.moveCall({
-        target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
-        typeArguments: [collateralType, rewardType],
-        arguments: [
-          checker,
-          globalConfigObj,
-          vaultObj,
-          this.transaction.sharedObjectRef(rewarder),
-          clockObj,
-        ],
+    if (this.config.INCENTIVE_PACKAGE_ID) {
+      const collateralType = this.config.COIN_TYPES[collateralSymbol];
+      const rewarders = this.config.VAULT_MAP[collateralSymbol].rewarders;
+      const globalConfigObj = this.transaction.sharedObjectRef(
+        this.config.INCENTIVE_GLOBAL_CONFIG_OBJ,
+      );
+      const registryObj = this.transaction.sharedObjectRef(
+        this.config.VAULT_REWARDER_REGISTRY_OBJ,
+      );
+      const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
+      const checker = this.transaction.moveCall({
+        target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
+        typeArguments: [collateralType],
+        arguments: [registryObj, globalConfigObj, updateResponse],
       });
-    });
-    const [responseAfterIncentive] = this.transaction.moveCall({
-      target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
-      typeArguments: [collateralType],
-      arguments: [checker, globalConfigObj],
-    });
-    updateResponse = responseAfterIncentive;
+      (rewarders ?? []).map((rewarder) => {
+        const rewardType = this.config.COIN_TYPES[rewarder.rewardSymbol];
+        this.transaction.moveCall({
+          target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::update`,
+          typeArguments: [collateralType, rewardType],
+          arguments: [
+            checker,
+            globalConfigObj,
+            vaultObj,
+            this.transaction.sharedObjectRef(rewarder),
+            clockObj,
+          ],
+        });
+      });
+      const [responseAfterIncentive] = this.transaction.moveCall({
+        target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::destroy_checker`,
+        typeArguments: [collateralType],
+        arguments: [checker, globalConfigObj],
+      });
+      updateResponse = responseAfterIncentive;
+    }
     this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::vault::destroy_response`,
-      typeArguments: [COIN_TYPES[collateralSymbol]],
+      typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
       arguments: [
         vaultObj,
         this.transaction.sharedObjectRef(this.config.TREASURY_OBJ),
@@ -750,7 +752,7 @@ export class VirtueClient {
       ? [accountRequest]
       : this.newAccountRequest(accountObj);
     const collCoins = Object.keys(this.config.VAULT_MAP).map((collSymbol) => {
-      const collType = COIN_TYPES[collSymbol as COLLATERAL_COIN];
+      const collType = this.config.COIN_TYPES[collSymbol as COLLATERAL_COIN];
       const [collCoin] = this.transaction.moveCall({
         target: `${this.config.STABILITY_POOL_OBJ}::stability_pool::claim`,
         typeArguments: [collType],
@@ -770,36 +772,38 @@ export class VirtueClient {
    */
   checkResponseForStabilityPool(response: TransactionArgument) {
     let positionResponse = response;
-    const globalConfigObj = this.transaction.sharedObjectRef(
-      this.config.INCENTIVE_GLOBAL_CONFIG_OBJ,
-    );
-    const registryObj = this.transaction.sharedObjectRef(
-      this.config.POOL_REWARDER_REGISTRY_OBJ,
-    );
-    const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
-    const checker = this.transaction.moveCall({
-      target: `${this.config.INCENTIVE_PACKAGE_ID}::stability_pool_incentive::new_checker`,
-      arguments: [registryObj, globalConfigObj, positionResponse],
-    });
-    (this.config.STABILITY_POOL_REWARDERS ?? []).map((rewarder) => {
-      const rewardType = COIN_TYPES[rewarder.rewardSymbol];
-      this.transaction.moveCall({
-        target: `${this.config.INCENTIVE_PACKAGE_ID}::stability_pool_incentive::update`,
-        typeArguments: [rewardType],
-        arguments: [
-          checker,
-          globalConfigObj,
-          this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
-          this.transaction.sharedObjectRef(rewarder),
-          clockObj,
-        ],
+    if (this.config.INCENTIVE_PACKAGE_ID) {
+      const globalConfigObj = this.transaction.sharedObjectRef(
+        this.config.INCENTIVE_GLOBAL_CONFIG_OBJ,
+      );
+      const registryObj = this.transaction.sharedObjectRef(
+        this.config.POOL_REWARDER_REGISTRY_OBJ,
+      );
+      const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
+      const checker = this.transaction.moveCall({
+        target: `${this.config.INCENTIVE_PACKAGE_ID}::stability_pool_incentive::new_checker`,
+        arguments: [registryObj, globalConfigObj, positionResponse],
       });
-    });
-    const [responseAfterIncentive] = this.transaction.moveCall({
-      target: `${this.config.INCENTIVE_PACKAGE_ID}::stability_pool_incentive::destroy_checker`,
-      arguments: [checker, globalConfigObj],
-    });
-    positionResponse = responseAfterIncentive;
+      (this.config.STABILITY_POOL_REWARDERS ?? []).map((rewarder) => {
+        const rewardType = this.config.COIN_TYPES[rewarder.rewardSymbol];
+        this.transaction.moveCall({
+          target: `${this.config.INCENTIVE_PACKAGE_ID}::stability_pool_incentive::update`,
+          typeArguments: [rewardType],
+          arguments: [
+            checker,
+            globalConfigObj,
+            this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
+            this.transaction.sharedObjectRef(rewarder),
+            clockObj,
+          ],
+        });
+      });
+      const [responseAfterIncentive] = this.transaction.moveCall({
+        target: `${this.config.INCENTIVE_PACKAGE_ID}::stability_pool_incentive::destroy_checker`,
+        arguments: [checker, globalConfigObj],
+      });
+      positionResponse = responseAfterIncentive;
+    }
 
     this.transaction.moveCall({
       target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::check_response`,
@@ -846,7 +850,7 @@ export class VirtueClient {
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
-    const coinType = COIN_TYPES[collateralSymbol];
+    const coinType = this.config.COIN_TYPES[collateralSymbol];
     const [depositCoin] = await this.splitInputCoins(
       collateralSymbol,
       depositAmount,
@@ -894,7 +898,7 @@ export class VirtueClient {
       } else {
         this.transaction.moveCall({
           target: "0x2::coin::destroy_zero",
-          typeArguments: [COIN_TYPES.VUSD],
+          typeArguments: [this.config.COIN_TYPES.VUSD],
           arguments: [vusdCoin],
         });
       }
@@ -926,7 +930,7 @@ export class VirtueClient {
       });
       this.transaction.moveCall({
         target: "0x2::coin::destroy_zero",
-        typeArguments: [COIN_TYPES.VUSD],
+        typeArguments: [this.config.COIN_TYPES.VUSD],
         arguments: [vusdCoin],
       });
       const tx = this.getTransaction();
@@ -953,7 +957,7 @@ export class VirtueClient {
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
-    const collType = COIN_TYPES[collateralSymbol];
+    const collType = this.config.COIN_TYPES[collateralSymbol];
     const vaultObj = this.config.VAULT_MAP[collateralSymbol].vault;
     const [collAmount, debtAmount] = this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::vault::get_position_data`,
@@ -984,7 +988,7 @@ export class VirtueClient {
     this.checkResponse({ collateralSymbol, response });
     this.transaction.moveCall({
       target: "0x2::coin::destroy_zero",
-      typeArguments: [COIN_TYPES.VUSD],
+      typeArguments: [this.config.COIN_TYPES.VUSD],
       arguments: [vusdCoin],
     });
     this.transaction.transferObjects(
@@ -1074,6 +1078,9 @@ export class VirtueClient {
     const { accountObj, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
+    if (!this.config.INCENTIVE_PACKAGE_ID) {
+      throw new Error("No rewards to claim");
+    }
     this.transaction.setSender(this.sender);
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
@@ -1089,8 +1096,8 @@ export class VirtueClient {
           const [reward] = this.transaction.moveCall({
             target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::claim`,
             typeArguments: [
-              COIN_TYPES[collSymbol as COLLATERAL_COIN],
-              COIN_TYPES[rewarder.rewardSymbol],
+              this.config.COIN_TYPES[collSymbol as COLLATERAL_COIN],
+              this.config.COIN_TYPES[rewarder.rewardSymbol],
             ],
             arguments: [
               this.transaction.sharedObjectRef(rewarder),
@@ -1119,6 +1126,9 @@ export class VirtueClient {
     const { accountObj, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
+    if (!this.config.INCENTIVE_PACKAGE_ID) {
+      throw new Error("No rewards to claim");
+    }
     this.transaction.setSender(this.sender);
     const [accountReq] = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
@@ -1131,7 +1141,7 @@ export class VirtueClient {
     this.config.STABILITY_POOL_REWARDERS.map((rewarder) => {
       const [reward] = this.transaction.moveCall({
         target: `${this.config.INCENTIVE_PACKAGE_ID}::stability_pool_incentive::claim`,
-        typeArguments: [COIN_TYPES[rewarder.rewardSymbol]],
+        typeArguments: [this.config.COIN_TYPES[rewarder.rewardSymbol]],
         arguments: [
           this.transaction.sharedObjectRef(rewarder),
           globalConfigObj,
@@ -1168,22 +1178,24 @@ export class VirtueClient {
     collateralSymbol: DEPOSIT_POINT_BONUS_COIN,
     response: TransactionArgument,
   ) {
-    this.transaction.moveCall({
-      target: `${this.config.POINT_PACKAGE_ID}::point::emit_point_for_deposit_action`,
-      typeArguments: [COIN_TYPES[collateralSymbol]],
-      arguments: [
-        this.transaction.sharedObjectRef(
-          this.config.POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF,
-        ),
-        this.transaction.sharedObjectRef(
-          this.config.POINT_HANDLER_MAP[collateralSymbol],
-        ),
-        this.transaction.sharedObjectRef(
-          this.config.VAULT_MAP[collateralSymbol].vault,
-        ),
-        response,
-        this.transaction.object.clock(),
-      ],
-    });
+    if (this.config.POINT_PACKAGE_ID) {
+      this.transaction.moveCall({
+        target: `${this.config.POINT_PACKAGE_ID}::point::emit_point_for_deposit_action`,
+        typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
+        arguments: [
+          this.transaction.sharedObjectRef(
+            this.config.POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF,
+          ),
+          this.transaction.sharedObjectRef(
+            this.config.POINT_HANDLER_MAP[collateralSymbol],
+          ),
+          this.transaction.sharedObjectRef(
+            this.config.VAULT_MAP[collateralSymbol].vault,
+          ),
+          response,
+          this.transaction.object.clock(),
+        ],
+      });
+    }
   }
 }

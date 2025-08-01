@@ -1,10 +1,12 @@
 import { COIN } from "@/types";
-import { COIN_TYPES } from "@/constants";
 import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
 
-export function getObjectNames(objectTypes: string[]) {
-  const accept_coin_type = Object.values(COIN_TYPES);
-  const accept_coin_name = Object.keys(COIN_TYPES);
+export function getObjectNames(
+  objectTypes: string[],
+  coinTypes: Record<COIN, string>,
+) {
+  const accept_coin_type = Object.values(coinTypes);
+  const accept_coin_name = Object.keys(coinTypes);
 
   const coinTypeList = objectTypes.map(
     (type) => type.split("<").pop()?.replace(">", "") ?? "",
@@ -21,22 +23,25 @@ export function getObjectNames(objectTypes: string[]) {
   return objectNameList;
 }
 
-export const getCoinType = (str: string) => {
+export const getCoinType = (str: string, coinTypes: Record<COIN, string>) => {
   const startIndex = str.indexOf("<");
   const endIndex = str.lastIndexOf(">");
 
   if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
     const coinType = str.slice(startIndex + 1, endIndex);
-    return coinType === "0x2::iota::IOTA" ? COIN_TYPES.IOTA : coinType;
+    return coinType === "0x2::iota::IOTA" ? coinTypes.IOTA : coinType;
   }
 
   return null;
 };
 
-export const getCoinSymbol = (coinType: string) => {
-  const coin = Object.keys(COIN_TYPES).find(
+export const getCoinSymbol = (
+  coinType: string,
+  coinTypes: Record<COIN, string>,
+) => {
+  const coin = Object.keys(coinTypes).find(
     (key) =>
-      normalizeIotaAddress(COIN_TYPES[key as COIN]) ===
+      normalizeIotaAddress(coinTypes[key as COIN]) ===
       normalizeIotaAddress(coinType),
   );
   if (coin) {
