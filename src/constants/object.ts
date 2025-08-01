@@ -1,4 +1,5 @@
 import {
+  COIN,
   COLLATERAL_COIN,
   DEPOSIT_POINT_BONUS_COIN,
   Rewarder,
@@ -7,6 +8,7 @@ import {
 } from "@/types";
 
 export type ConfigType = {
+  COIN_TYPES: Record<COIN, string>;
   ORIGINAL_FRAMEWORK_PACKAGE_ID: string;
   ORIGINAL_VUSD_PACKAGE_ID: string;
   ORIGINAL_ORACLE_PACKAGE_ID: string;
@@ -51,6 +53,12 @@ export type ConfigType = {
 
 export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
   mainnet: {
+    COIN_TYPES: {
+      IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
+      stIOTA:
+        "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
+      VUSD: "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f::vusd::VUSD",
+    },
     ORIGINAL_FRAMEWORK_PACKAGE_ID:
       "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b",
     ORIGINAL_VUSD_PACKAGE_ID:
@@ -214,6 +222,11 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     },
   },
   testnet: {
+    COIN_TYPES: {
+      IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
+      stIOTA: "::cert::CERT",
+      VUSD: "::vusd::VUSD",
+    },
     ORIGINAL_FRAMEWORK_PACKAGE_ID:
       "0x5e1fb08bd2360286cd13dd174f6d17aa8871b08906aa8001079199ad62ad81b1",
     ORIGINAL_VUSD_PACKAGE_ID:
