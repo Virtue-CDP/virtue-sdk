@@ -65,7 +65,9 @@ export class VirtueClient {
     this.sender = sender;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
-      "https://hermes.pyth.network",
+      network === "mainnet"
+        ? "https://hermes.pyth.network"
+        : "https://hermes-beta.pyth.network",
     );
     /* eslint-disable  @typescript-eslint/no-explicit-any */
     this.pythClient = new IotaPythClient(
