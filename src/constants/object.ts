@@ -224,8 +224,9 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
   testnet: {
     COIN_TYPES: {
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
-      stIOTA: "::cert::CERT",
-      VUSD: "::vusd::VUSD",
+      stIOTA:
+        "0x1461ef74f97e83eb024a448ab851f980f4e577a97877069c72b44b5fe9929ee3::cert::CERT",
+      VUSD: "0x593f156dd35f5f68812fbdd0694eac3a93137154d5f795bc548b5bfe3331c9b5::vusd::VUSD",
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID:
       "0x5e1fb08bd2360286cd13dd174f6d17aa8871b08906aa8001079199ad62ad81b1",
