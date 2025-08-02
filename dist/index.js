@@ -803,7 +803,7 @@ var VirtueClient = class {
   /**
    * @description Create a AccountRequest
    * @param accountObj (optional): Account object or EOA if undefined
-   * @return [AccountRequest]
+   * @return AccountRequest
    */
   newAccountRequest(accountObj) {
     return accountObj ? this.transaction.moveCall({
@@ -818,7 +818,7 @@ var VirtueClient = class {
   /**
    * @description Create a price collector
    * @param collateral coin symbol, e.g "IOTA"
-   * @return [PriceCollector]
+   * @return PriceCollector
    */
   newPriceCollector(collateralSymbol) {
     return this.transaction.moveCall({
@@ -832,7 +832,7 @@ var VirtueClient = class {
    * @return [PriceResult]
    */
   async aggregatePrice(collateralSymbol) {
-    const [collector] = this.newPriceCollector(collateralSymbol);
+    const collector = this.newPriceCollector(collateralSymbol);
     const coinType = this.config.COIN_TYPES[collateralSymbol];
     const vaultInfo = this.config.VAULT_MAP[collateralSymbol];
     if (vaultInfo.pythPriceId) {
@@ -864,8 +864,8 @@ var VirtueClient = class {
         ]
       });
     } else if (collateralSymbol === "stIOTA") {
-      const [collector2] = this.newPriceCollector("stIOTA");
-      const [iotaPriceResult] = await this.aggregatePrice("IOTA");
+      const collector2 = this.newPriceCollector("stIOTA");
+      const iotaPriceResult = await this.aggregatePrice("IOTA");
       this.transaction.moveCall({
         target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
         arguments: [
@@ -895,7 +895,7 @@ var VirtueClient = class {
    * @param repaymentCoin: repyment input coin (always VUSD)
    * @param withdrawAmount: the amount to withdraw
    * @param accountObj (optional): account object id or transaction argument
-   * @returns [UpdateRequest]
+   * @returns UpdateRequest
    */
   debtorRequest(inputs) {
     const {
@@ -908,7 +908,7 @@ var VirtueClient = class {
     } = inputs;
     const coinType = this.config.COIN_TYPES[collateralSymbol];
     const vaultId = this.config.VAULT_MAP[collateralSymbol].vault.objectId;
-    const [accountReq] = this.newAccountRequest(accountObj);
+    const accountReq = this.newAccountRequest(accountObj);
     return this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::request::debtor_request`,
       typeArguments: [coinType],
@@ -928,7 +928,7 @@ var VirtueClient = class {
    * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
    * @param updateRequest: manager request, ex: see this.debtorRequest
    * @param priceResult: price result, see this.aggregatePrice
-   * @returns [Coin<T>, COIN<VUSD>]
+   * @returns [Coin<T>, COIN<VUSD>, UpdateResponse]
    */
   updatePosition(inputs) {
     const { collateralSymbol, updateRequest, priceResult } = inputs;
@@ -941,7 +941,7 @@ var VirtueClient = class {
       target: `0x1::option::none`,
       typeArguments: [priceResultType]
     });
-    return this.transaction.moveCall({
+    const [collCoin, vusdCoin, response] = this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::vault::update_position`,
       typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
       arguments: [
@@ -952,6 +952,7 @@ var VirtueClient = class {
         updateRequest
       ]
     });
+    return [collCoin, vusdCoin, response];
   }
   /**
    * @description check and destroy UpdateResponse
@@ -1008,7 +1009,7 @@ var VirtueClient = class {
    * @description deposit to stability pool
    * @param vusdCoin: coin of VUSD
    * @param recipient (optional): deposit for recipient instead of sender
-   * @returns [PositionResponse]
+   * @returns PositionResponse
    */
   depositStabilityPool(inputs) {
     const { vusdCoin, recipient } = inputs;
@@ -1031,8 +1032,8 @@ var VirtueClient = class {
    */
   withdrawStabilityPool(inputs) {
     const { amount, accountRequest, accountObj } = inputs;
-    const [accountReq] = accountRequest ? [accountRequest] : this.newAccountRequest(accountObj);
-    return this.transaction.moveCall({
+    const accountReq = accountRequest ? accountRequest : this.newAccountRequest(accountObj);
+    const [vusdCoin, response] = this.transaction.moveCall({
       target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::withdraw`,
       arguments: [
         this.stabilityPoolObj(),
@@ -1041,13 +1042,14 @@ var VirtueClient = class {
         this.transaction.pure.u64(amount)
       ]
     });
+    return [vusdCoin, response];
   }
   /**
    * @description claim from stability pool
    */
   claimStabilityPool(inputs) {
     const { accountRequest, accountObj } = inputs;
-    const [accountReq] = accountRequest ? [accountRequest] : this.newAccountRequest(accountObj);
+    const accountReq = accountRequest ? accountRequest : this.newAccountRequest(accountObj);
     const collCoins = Object.keys(this.config.VAULT_MAP).map((collSymbol) => {
       const collType = this.config.COIN_TYPES[collSymbol];
       const [collCoin] = this.transaction.moveCall({
@@ -1134,8 +1136,8 @@ var VirtueClient = class {
     );
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      const [priceResult] = await this.aggregatePrice(collateralSymbol);
-      const [updateRequest] = this.debtorRequest({
+      const priceResult = await this.aggregatePrice(collateralSymbol);
+      const updateRequest = this.debtorRequest({
         collateralSymbol,
         depositCoin,
         borrowAmount,
@@ -1158,7 +1160,7 @@ var VirtueClient = class {
       }
       if (Number(borrowAmount) > 0) {
         if (recipient === "StabilityPool") {
-          const [response2] = this.depositStabilityPool({ vusdCoin, recipient });
+          const response2 = this.depositStabilityPool({ vusdCoin, recipient });
           this.checkResponseForStabilityPool(response2);
         } else {
           this.transaction.transferObjects(
@@ -1173,7 +1175,7 @@ var VirtueClient = class {
       this.resetTransaction();
       return tx;
     } else {
-      const [updateRequest] = this.debtorRequest({
+      const updateRequest = this.debtorRequest({
         collateralSymbol,
         depositCoin,
         borrowAmount,
@@ -1218,7 +1220,7 @@ var VirtueClient = class {
       ]
     });
     const repaymentCoin = await this.splitInputCoins("VUSD", debtAmount);
-    const [updateRequest] = this.debtorRequest({
+    const updateRequest = this.debtorRequest({
       collateralSymbol,
       depositCoin: this.zeroCoin(collateralSymbol),
       borrowAmount: "0",
@@ -1253,7 +1255,7 @@ var VirtueClient = class {
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
     const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
-    const [response] = this.depositStabilityPool({ vusdCoin, recipient });
+    const response = this.depositStabilityPool({ vusdCoin, recipient });
     this.checkResponseForStabilityPool(response);
     const tx = this.getTransaction();
     if (!keepTransaction) this.resetTransaction();
@@ -1306,7 +1308,7 @@ var VirtueClient = class {
       throw new Error("No rewards to claim");
     }
     this.transaction.setSender(this.sender);
-    const [accountReq] = this.newAccountRequest(accountObj);
+    const accountReq = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
       this.config.INCENTIVE_GLOBAL_CONFIG_OBJ
     );
@@ -1350,7 +1352,7 @@ var VirtueClient = class {
       throw new Error("No rewards to claim");
     }
     this.transaction.setSender(this.sender);
-    const [accountReq] = this.newAccountRequest(accountObj);
+    const accountReq = this.newAccountRequest(accountObj);
     const globalConfigObj = this.transaction.sharedObjectRef(
       this.config.INCENTIVE_GLOBAL_CONFIG_OBJ
     );

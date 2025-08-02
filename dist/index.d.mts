@@ -236,21 +236,21 @@ declare class VirtueClient {
     /**
      * @description Create a AccountRequest
      * @param accountObj (optional): Account object or EOA if undefined
-     * @return [AccountRequest]
+     * @return AccountRequest
      */
-    newAccountRequest(accountObj?: string | TransactionArgument): TransactionResult;
+    newAccountRequest(accountObj?: string | TransactionArgument): TransactionArgument;
     /**
      * @description Create a price collector
      * @param collateral coin symbol, e.g "IOTA"
-     * @return [PriceCollector]
+     * @return PriceCollector
      */
-    newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionResult;
+    newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
     /**
      * @description Get a price result
      * @param collateral coin symbol, e.g "IOTA"
      * @return [PriceResult]
      */
-    aggregatePrice(collateralSymbol: COLLATERAL_COIN): Promise<TransactionResult>;
+    aggregatePrice(collateralSymbol: COLLATERAL_COIN): Promise<TransactionArgument>;
     /**
      * @description Get a request to Mange Position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
@@ -259,7 +259,7 @@ declare class VirtueClient {
      * @param repaymentCoin: repyment input coin (always VUSD)
      * @param withdrawAmount: the amount to withdraw
      * @param accountObj (optional): account object id or transaction argument
-     * @returns [UpdateRequest]
+     * @returns UpdateRequest
      */
     debtorRequest(inputs: {
         collateralSymbol: COLLATERAL_COIN;
@@ -268,19 +268,19 @@ declare class VirtueClient {
         repaymentCoin: TransactionArgument;
         withdrawAmount: string | TransactionArgument;
         accountObj?: string | TransactionArgument;
-    }): TransactionResult;
+    }): TransactionArgument;
     /**
      * @description Manage Position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
      * @param updateRequest: manager request, ex: see this.debtorRequest
      * @param priceResult: price result, see this.aggregatePrice
-     * @returns [Coin<T>, COIN<VUSD>]
+     * @returns [Coin<T>, COIN<VUSD>, UpdateResponse]
      */
     updatePosition(inputs: {
         collateralSymbol: COLLATERAL_COIN;
         updateRequest: TransactionArgument;
         priceResult?: TransactionArgument;
-    }): TransactionResult;
+    }): [TransactionArgument, TransactionArgument, TransactionArgument];
     /**
      * @description check and destroy UpdateResponse
      * @param collateralSymbol: "IOTA" or "stIOTA"
@@ -294,12 +294,12 @@ declare class VirtueClient {
      * @description deposit to stability pool
      * @param vusdCoin: coin of VUSD
      * @param recipient (optional): deposit for recipient instead of sender
-     * @returns [PositionResponse]
+     * @returns PositionResponse
      */
     depositStabilityPool(inputs: {
         vusdCoin: TransactionArgument;
         recipient?: string;
-    }): TransactionResult;
+    }): TransactionArgument;
     /**
      * @description withdraw from stability pool
      * @param amount: how much amount to withdraw
@@ -311,7 +311,7 @@ declare class VirtueClient {
         amount: string;
         accountRequest?: TransactionArgument;
         accountObj?: string | TransactionArgument;
-    }): TransactionResult;
+    }): [TransactionArgument, TransactionArgument];
     /**
      * @description claim from stability pool
      */
