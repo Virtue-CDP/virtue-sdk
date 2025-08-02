@@ -432,6 +432,17 @@ export class VirtueClient {
   }
 
   /**
+   * @description destroy zero coin
+   */
+  destroyZeroCoin(coinSymbol: COIN, coin: TransactionArgument) {
+    this.transaction.moveCall({
+      target: "0x2::coin::destroy_zero",
+      typeArguments: [this.config.COIN_TYPES[coinSymbol]],
+      arguments: [coin],
+    });
+  }
+
+  /**
    * @description split the needed coins
    */
   async splitInputCoins(
@@ -512,6 +523,24 @@ export class VirtueClient {
     return this.transaction;
   }
 
+  treasuryObj(): TransactionArgument {
+    return this.transaction.sharedObjectRef(this.config.TREASURY_OBJ);
+  }
+
+  clockObj(): TransactionArgument {
+    return this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
+  }
+
+  vaultObj(collateralSymbol: COLLATERAL_COIN): TransactionArgument {
+    return this.transaction.sharedObjectRef(
+      this.config.VAULT_MAP[collateralSymbol].vault,
+    );
+  }
+
+  stabilityPoolObj(): TransactionArgument {
+    return this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ);
+  }
+
   /**
    * @description Create a AccountRequest
    * @param accountObj (optional): Account object or EOA if undefined
@@ -572,7 +601,7 @@ export class VirtueClient {
         arguments: [
           collector,
           this.transaction.sharedObjectRef(this.config.PYTH_RULE_CONFIG_OBJ),
-          this.transaction.sharedObjectRef(this.config.CLOCK_OBJ),
+          this.clockObj(),
           this.transaction.object(this.config.PYTH_STATE_ID),
           this.transaction.object(priceInfoObjId),
         ],
@@ -644,7 +673,7 @@ export class VirtueClient {
       typeArguments: [coinType],
       arguments: [
         accountReq,
-        this.transaction.sharedObjectRef(this.config.TREASURY_OBJ),
+        this.treasuryObj(),
         this.transaction.pure.id(vaultId),
         depositCoin,
         typeof borrowAmount === "string"
@@ -671,7 +700,6 @@ export class VirtueClient {
     priceResult?: TransactionArgument;
   }): TransactionResult {
     const { collateralSymbol, updateRequest, priceResult } = inputs;
-    const vault = this.config.VAULT_MAP[collateralSymbol].vault;
     const priceResultType = `${this.config.ORIGINAL_ORACLE_PACKAGE_ID}::result::PriceResult<${this.config.COIN_TYPES[collateralSymbol]}>`;
     const priceResultOpt = priceResult
       ? this.transaction.moveCall({
@@ -687,9 +715,9 @@ export class VirtueClient {
       target: `${this.config.CDP_PACKAGE_ID}::vault::update_position`,
       typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
       arguments: [
-        this.transaction.sharedObjectRef(vault),
-        this.transaction.sharedObjectRef(this.config.TREASURY_OBJ),
-        this.transaction.sharedObjectRef(this.config.CLOCK_OBJ),
+        this.vaultObj(collateralSymbol),
+        this.treasuryObj(),
+        this.clockObj(),
         priceResultOpt,
         updateRequest,
       ],
@@ -707,8 +735,7 @@ export class VirtueClient {
   }) {
     const { collateralSymbol, response } = inputs;
     let updateResponse = response;
-    const vault = this.config.VAULT_MAP[collateralSymbol].vault;
-    const vaultObj = this.transaction.sharedObjectRef(vault);
+    const vaultObj = this.vaultObj(collateralSymbol);
     if (this.config.INCENTIVE_PACKAGE_ID) {
       const collateralType = this.config.COIN_TYPES[collateralSymbol];
       const rewarders = this.config.VAULT_MAP[collateralSymbol].rewarders;
@@ -718,7 +745,7 @@ export class VirtueClient {
       const registryObj = this.transaction.sharedObjectRef(
         this.config.VAULT_REWARDER_REGISTRY_OBJ,
       );
-      const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
+      const clockObj = this.clockObj();
       const checker = this.transaction.moveCall({
         target: `${this.config.INCENTIVE_PACKAGE_ID}::borrow_incentive::new_checker`,
         typeArguments: [collateralType],
@@ -748,11 +775,7 @@ export class VirtueClient {
     this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::vault::destroy_response`,
       typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
-      arguments: [
-        vaultObj,
-        this.transaction.sharedObjectRef(this.config.TREASURY_OBJ),
-        updateResponse,
-      ],
+      arguments: [vaultObj, this.treasuryObj(), updateResponse],
     });
   }
 
@@ -770,8 +793,8 @@ export class VirtueClient {
     return this.transaction.moveCall({
       target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::deposit`,
       arguments: [
-        this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
-        this.transaction.sharedObjectRef(this.config.CLOCK_OBJ),
+        this.stabilityPoolObj(),
+        this.clockObj(),
         this.transaction.pure.address(recipient ?? this.sender),
         vusdCoin,
       ],
@@ -797,8 +820,8 @@ export class VirtueClient {
     return this.transaction.moveCall({
       target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::withdraw`,
       arguments: [
-        this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
-        this.transaction.sharedObjectRef(this.config.CLOCK_OBJ),
+        this.stabilityPoolObj(),
+        this.clockObj(),
         accountReq,
         this.transaction.pure.u64(amount),
       ],
@@ -819,12 +842,9 @@ export class VirtueClient {
     const collCoins = Object.keys(this.config.VAULT_MAP).map((collSymbol) => {
       const collType = this.config.COIN_TYPES[collSymbol as COLLATERAL_COIN];
       const [collCoin] = this.transaction.moveCall({
-        target: `${this.config.STABILITY_POOL_OBJ}::stability_pool::claim`,
+        target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::claim`,
         typeArguments: [collType],
-        arguments: [
-          this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
-          accountReq,
-        ],
+        arguments: [this.stabilityPoolObj(), accountReq],
       });
       return collCoin;
     });
@@ -844,7 +864,7 @@ export class VirtueClient {
       const registryObj = this.transaction.sharedObjectRef(
         this.config.POOL_REWARDER_REGISTRY_OBJ,
       );
-      const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
+      const clockObj = this.clockObj();
       const checker = this.transaction.moveCall({
         target: `${this.config.INCENTIVE_PACKAGE_ID}::stability_pool_incentive::new_checker`,
         arguments: [registryObj, globalConfigObj, positionResponse],
@@ -857,7 +877,7 @@ export class VirtueClient {
           arguments: [
             checker,
             globalConfigObj,
-            this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
+            this.stabilityPoolObj(),
             this.transaction.sharedObjectRef(rewarder),
             clockObj,
           ],
@@ -872,10 +892,7 @@ export class VirtueClient {
 
     this.transaction.moveCall({
       target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::check_response`,
-      arguments: [
-        this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
-        positionResponse,
-      ],
+      arguments: [this.stabilityPoolObj(), positionResponse],
     });
   }
 
@@ -915,7 +932,6 @@ export class VirtueClient {
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
-    const coinType = this.config.COIN_TYPES[collateralSymbol];
     const [depositCoin] = await this.splitInputCoins(
       collateralSymbol,
       depositAmount,
@@ -944,11 +960,7 @@ export class VirtueClient {
       if (Number(withdrawAmount) > 0) {
         this.transaction.transferObjects([collCoin], recipient ?? this.sender);
       } else {
-        this.transaction.moveCall({
-          target: "0x2::coin::destroy_zero",
-          typeArguments: [coinType],
-          arguments: [collCoin],
-        });
+        this.destroyZeroCoin(collateralSymbol, collCoin);
       }
       if (Number(borrowAmount) > 0) {
         if (recipient === "StabilityPool") {
@@ -961,11 +973,7 @@ export class VirtueClient {
           );
         }
       } else {
-        this.transaction.moveCall({
-          target: "0x2::coin::destroy_zero",
-          typeArguments: [this.config.COIN_TYPES.VUSD],
-          arguments: [vusdCoin],
-        });
+        this.destroyZeroCoin("VUSD", vusdCoin);
       }
       const tx = this.getTransaction();
       this.resetTransaction();
@@ -988,16 +996,8 @@ export class VirtueClient {
         this.emitPointForDepositAction(collateralSymbol, response);
 
       this.checkResponse({ collateralSymbol, response });
-      this.transaction.moveCall({
-        target: "0x2::coin::destroy_zero",
-        typeArguments: [coinType],
-        arguments: [collCoin],
-      });
-      this.transaction.moveCall({
-        target: "0x2::coin::destroy_zero",
-        typeArguments: [this.config.COIN_TYPES.VUSD],
-        arguments: [vusdCoin],
-      });
+      this.destroyZeroCoin(collateralSymbol, collCoin);
+      this.destroyZeroCoin("VUSD", vusdCoin);
       const tx = this.getTransaction();
       if (!keepTransaction) this.resetTransaction();
       return tx;
@@ -1023,14 +1023,13 @@ export class VirtueClient {
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
     const collType = this.config.COIN_TYPES[collateralSymbol];
-    const vaultObj = this.config.VAULT_MAP[collateralSymbol].vault;
     const [collAmount, debtAmount] = this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::vault::get_position_data`,
       typeArguments: [collType],
       arguments: [
-        this.transaction.sharedObjectRef(vaultObj),
+        this.vaultObj(collateralSymbol),
         this.transaction.pure.address(this.sender),
-        this.transaction.sharedObjectRef(this.config.CLOCK_OBJ),
+        this.clockObj(),
       ],
     });
     const repaymentCoin = await this.splitInputCoins("VUSD", debtAmount);
@@ -1051,11 +1050,7 @@ export class VirtueClient {
       this.emitPointForDepositAction(collateralSymbol, response);
 
     this.checkResponse({ collateralSymbol, response });
-    this.transaction.moveCall({
-      target: "0x2::coin::destroy_zero",
-      typeArguments: [this.config.COIN_TYPES.VUSD],
-      arguments: [vusdCoin],
-    });
+    this.destroyZeroCoin("VUSD", vusdCoin);
     this.transaction.transferObjects(
       [collCoin],
       recipient ?? this.transaction.pure.address(this.sender),
@@ -1151,11 +1146,11 @@ export class VirtueClient {
     const globalConfigObj = this.transaction.sharedObjectRef(
       this.config.INCENTIVE_GLOBAL_CONFIG_OBJ,
     );
-    const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
+    const clockObj = this.clockObj();
     Object.keys(this.config.VAULT_MAP).map((collSymbol) => {
       const vaultInfo = this.config.VAULT_MAP[collSymbol as COLLATERAL_COIN];
       const rewarders = vaultInfo.rewarders;
-      const vaultObj = this.transaction.sharedObjectRef(vaultInfo.vault);
+      const vaultObj = this.vaultObj(collSymbol as COLLATERAL_COIN);
       if (rewarders) {
         rewarders.map((rewarder) => {
           const [reward] = this.transaction.moveCall({
@@ -1199,7 +1194,7 @@ export class VirtueClient {
     const globalConfigObj = this.transaction.sharedObjectRef(
       this.config.INCENTIVE_GLOBAL_CONFIG_OBJ,
     );
-    const clockObj = this.transaction.sharedObjectRef(this.config.CLOCK_OBJ);
+    const clockObj = this.clockObj();
     const stabilityPoolObj = this.transaction.sharedObjectRef(
       this.config.STABILITY_POOL_OBJ,
     );

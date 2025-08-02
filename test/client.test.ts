@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { VirtueClient } from "../src/index";
 
 describe("Interacting with VirtueClient", () => {
@@ -29,11 +29,10 @@ describe("Interacting with VirtueClient", () => {
     });
     expect(tx).toBeDefined();
     tx.setSender(client.sender);
-    console.log(
-      await client.getIotaClient().dryRunTransactionBlock({
-        transactionBlock: await tx.build({ client: client.getIotaClient() }),
-      }),
-    );
+    const dryrunRes = await client.getIotaClient().dryRunTransactionBlock({
+      transactionBlock: await tx.build({ client: client.getIotaClient() }),
+    });
+    assert(dryrunRes.effects.status.status === "success");
   }, 15000);
 
   it("test getDebtorPositions() function", async () => {

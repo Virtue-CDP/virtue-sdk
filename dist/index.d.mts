@@ -213,6 +213,10 @@ declare class VirtueClient {
      */
     zeroCoin(coinSymbol: COIN): TransactionResult;
     /**
+     * @description destroy zero coin
+     */
+    destroyZeroCoin(coinSymbol: COIN, coin: TransactionArgument): void;
+    /**
      * @description split the needed coins
      */
     splitInputCoins(coinSymbol: COIN, ...amounts: (string | TransactionArgument)[]): Promise<TransactionResult>;
@@ -225,6 +229,10 @@ declare class VirtueClient {
      * @returns Transaction
      */
     getTransaction(): Transaction;
+    treasuryObj(): TransactionArgument;
+    clockObj(): TransactionArgument;
+    vaultObj(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
+    stabilityPoolObj(): TransactionArgument;
     /**
      * @description Create a AccountRequest
      * @param accountObj (optional): Account object or EOA if undefined
