@@ -383,6 +383,7 @@ var parseVaultObject = (coinSymbol, fields) => {
 
 var _pythiotajs = require('@pythnetwork/pyth-iota-js');
 var _bcs = require('@iota/iota-sdk/bcs');
+
 var getCoinSymbol2 = (coinType, coinTypes) => {
   const coin = Object.keys(coinTypes).find(
     (key) => coinTypes[key] === coinType
@@ -392,13 +393,13 @@ var getCoinSymbol2 = (coinType, coinTypes) => {
   }
   return void 0;
 };
-var DUMMY_ADDRESS = "0x0";
+var DUMMY_ADDRESS = _utils.normalizeIotaAddress.call(void 0, "0x0");
 var VirtueClient = class {
   constructor(inputs) {
-    const { network, rpcUrl, sender } = inputs;
+    const { network, rpcUrl, sender } = _nullishCoalesce(inputs, () => ( {}));
     this.config = CONFIG[_nullishCoalesce(network, () => ( "mainnet"))];
     this.rpcEndpoint = _nullishCoalesce(rpcUrl, () => ( _client.getFullnodeUrl.call(void 0, _nullishCoalesce(network, () => ( "mainnet")))));
-    this.sender = _nullishCoalesce(sender, () => ( DUMMY_ADDRESS));
+    this.sender = sender ? _utils.normalizeIotaAddress.call(void 0, sender) : DUMMY_ADDRESS;
     this.iotaClient = new (0, _client.IotaClient)({ url: this.rpcEndpoint });
     this.pythConnection = new (0, _pythiotajs.IotaPriceServiceConnection)(
       "https://hermes.pyth.network"

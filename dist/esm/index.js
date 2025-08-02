@@ -383,6 +383,7 @@ import {
   IotaPythClient
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
+import { normalizeIotaAddress as normalizeIotaAddress2 } from "@iota/iota-sdk/utils";
 var getCoinSymbol2 = (coinType, coinTypes) => {
   const coin = Object.keys(coinTypes).find(
     (key) => coinTypes[key] === coinType
@@ -392,13 +393,13 @@ var getCoinSymbol2 = (coinType, coinTypes) => {
   }
   return void 0;
 };
-var DUMMY_ADDRESS = "0x0";
+var DUMMY_ADDRESS = normalizeIotaAddress2("0x0");
 var VirtueClient = class {
   constructor(inputs) {
-    const { network, rpcUrl, sender } = inputs;
+    const { network, rpcUrl, sender } = inputs ?? {};
     this.config = CONFIG[network ?? "mainnet"];
     this.rpcEndpoint = rpcUrl ?? getFullnodeUrl(network ?? "mainnet");
-    this.sender = sender ?? DUMMY_ADDRESS;
+    this.sender = sender ? normalizeIotaAddress2(sender) : DUMMY_ADDRESS;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
       "https://hermes.pyth.network"

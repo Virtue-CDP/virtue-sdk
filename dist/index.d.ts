@@ -138,7 +138,7 @@ declare class VirtueClient {
     transaction: Transaction;
     sender: string;
     config: ConfigType;
-    constructor(inputs: {
+    constructor(inputs?: {
         network?: "mainnet" | "testnet";
         rpcUrl?: string;
         sender?: string;
