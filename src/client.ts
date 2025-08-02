@@ -25,7 +25,6 @@ import {
   IotaPythClient,
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
-import { isValidIotaAddress } from "@iota/iota-sdk/utils";
 
 const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
   const coin = Object.keys(coinTypes).find(
@@ -36,6 +35,8 @@ const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
   }
   return undefined;
 };
+
+const DUMMY_ADDRESS = "0x0";
 
 export class VirtueClient {
   /**
@@ -54,15 +55,12 @@ export class VirtueClient {
   constructor(inputs: {
     network?: "mainnet" | "testnet";
     rpcUrl?: string;
-    sender: string;
+    sender?: string;
   }) {
     const { network, rpcUrl, sender } = inputs;
     this.config = CONFIG[network ?? "mainnet"];
     this.rpcEndpoint = rpcUrl ?? getFullnodeUrl(network ?? "mainnet");
-    if (!isValidIotaAddress(sender)) {
-      throw new Error("Invalid sender address");
-    }
-    this.sender = sender;
+    this.sender = sender ?? DUMMY_ADDRESS;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
     this.pythConnection = new IotaPriceServiceConnection(
       "https://hermes.pyth.network",
@@ -156,7 +154,7 @@ export class VirtueClient {
     const clockObj = tx.sharedObjectRef(this.config.CLOCK_OBJ);
     const tokenList = Object.keys(this.config.VAULT_MAP) as COLLATERAL_COIN[];
     const debtorAddr = debtor ?? this.sender;
-    if (!isValidIotaAddress(debtorAddr)) {
+    if (debtorAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid debtor address");
     }
     tokenList.map((token) => {
@@ -226,7 +224,7 @@ export class VirtueClient {
     account?: string,
   ): Promise<StabilityPoolBalances> {
     const accountAddr = account ?? this.sender;
-    if (!isValidIotaAddress(accountAddr)) {
+    if (accountAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid account address");
     }
     const res = await this.iotaClient.getDynamicFieldObject({
@@ -268,7 +266,7 @@ export class VirtueClient {
     account?: string,
   ): Promise<Rewards> {
     const accountAddr = account ?? this.sender;
-    if (!isValidIotaAddress(accountAddr)) {
+    if (accountAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid debtor address");
     }
     const tx = new Transaction();
@@ -317,7 +315,7 @@ export class VirtueClient {
   async getStabilityPoolRewards(account?: string): Promise<Rewards> {
     const tx = new Transaction();
     const accountAddr = account ?? this.sender;
-    if (!isValidIotaAddress(accountAddr)) {
+    if (accountAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid debtor address");
     }
 

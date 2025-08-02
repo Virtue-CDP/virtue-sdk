@@ -383,7 +383,6 @@ var parseVaultObject = (coinSymbol, fields) => {
 
 var _pythiotajs = require('@pythnetwork/pyth-iota-js');
 var _bcs = require('@iota/iota-sdk/bcs');
-
 var getCoinSymbol2 = (coinType, coinTypes) => {
   const coin = Object.keys(coinTypes).find(
     (key) => coinTypes[key] === coinType
@@ -393,15 +392,13 @@ var getCoinSymbol2 = (coinType, coinTypes) => {
   }
   return void 0;
 };
+var DUMMY_ADDRESS = "0x0";
 var VirtueClient = class {
   constructor(inputs) {
     const { network, rpcUrl, sender } = inputs;
     this.config = CONFIG[_nullishCoalesce(network, () => ( "mainnet"))];
     this.rpcEndpoint = _nullishCoalesce(rpcUrl, () => ( _client.getFullnodeUrl.call(void 0, _nullishCoalesce(network, () => ( "mainnet")))));
-    if (!_utils.isValidIotaAddress.call(void 0, sender)) {
-      throw new Error("Invalid sender address");
-    }
-    this.sender = sender;
+    this.sender = _nullishCoalesce(sender, () => ( DUMMY_ADDRESS));
     this.iotaClient = new (0, _client.IotaClient)({ url: this.rpcEndpoint });
     this.pythConnection = new (0, _pythiotajs.IotaPriceServiceConnection)(
       "https://hermes.pyth.network"
@@ -479,7 +476,7 @@ var VirtueClient = class {
     const clockObj = tx.sharedObjectRef(this.config.CLOCK_OBJ);
     const tokenList = Object.keys(this.config.VAULT_MAP);
     const debtorAddr = _nullishCoalesce(debtor, () => ( this.sender));
-    if (!_utils.isValidIotaAddress.call(void 0, debtorAddr)) {
+    if (debtorAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid debtor address");
     }
     tokenList.map((token) => {
@@ -537,7 +534,7 @@ var VirtueClient = class {
    */
   async getStabilityPoolBalances(account) {
     const accountAddr = _nullishCoalesce(account, () => ( this.sender));
-    if (!_utils.isValidIotaAddress.call(void 0, accountAddr)) {
+    if (accountAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid account address");
     }
     const res = await this.iotaClient.getDynamicFieldObject({
@@ -572,7 +569,7 @@ var VirtueClient = class {
    */
   async getBorrowRewards(collateralSymbol, account) {
     const accountAddr = _nullishCoalesce(account, () => ( this.sender));
-    if (!_utils.isValidIotaAddress.call(void 0, accountAddr)) {
+    if (accountAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid debtor address");
     }
     const tx = new (0, _transactions.Transaction)();
@@ -618,7 +615,7 @@ var VirtueClient = class {
   async getStabilityPoolRewards(account) {
     const tx = new (0, _transactions.Transaction)();
     const accountAddr = _nullishCoalesce(account, () => ( this.sender));
-    if (!_utils.isValidIotaAddress.call(void 0, accountAddr)) {
+    if (accountAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid debtor address");
     }
     this.config.STABILITY_POOL_REWARDERS.map((rewarder) => {
