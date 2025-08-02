@@ -2,7 +2,10 @@
 import {
   Transaction
 } from "@iota/iota-sdk/transactions";
-import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
+import {
+  getFullnodeUrl,
+  IotaClient
+} from "@iota/iota-sdk/client";
 
 // src/constants/coin.ts
 var COIN_DECIMALS = {
@@ -785,6 +788,24 @@ var VirtueClient = class {
    */
   getTransaction() {
     return this.transaction;
+  }
+  async dryrunTransaction() {
+    this.transaction.setSender(this.sender);
+    return this.iotaClient.dryRunTransactionBlock({
+      transactionBlock: await this.transaction.build({
+        client: this.iotaClient
+      })
+    });
+  }
+  async signAndExecuteTransaction(signer, options) {
+    if (signer.toIotaAddress() !== this.sender) {
+      throw new Error("Invalid signer");
+    }
+    return this.iotaClient.signAndExecuteTransaction({
+      transaction: this.transaction,
+      signer,
+      options
+    });
   }
   treasuryObj() {
     return this.transaction.sharedObjectRef(this.config.TREASURY_OBJ);

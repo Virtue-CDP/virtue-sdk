@@ -3,7 +3,13 @@ import {
   TransactionArgument,
   TransactionResult,
 } from "@iota/iota-sdk/transactions";
-import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
+import {
+  DryRunTransactionBlockResponse,
+  getFullnodeUrl,
+  IotaClient,
+  IotaTransactionBlockResponse,
+  IotaTransactionBlockResponseOptions,
+} from "@iota/iota-sdk/client";
 
 import { COIN_DECIMALS, CONFIG, ConfigType } from "@/constants";
 import {
@@ -27,6 +33,7 @@ import {
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
 import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
+import { Keypair } from "@iota/iota-sdk/cryptography";
 
 const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
   const coin = Object.keys(coinTypes).find(
@@ -521,6 +528,29 @@ export class VirtueClient {
    */
   getTransaction(): Transaction {
     return this.transaction;
+  }
+
+  async dryrunTransaction(): Promise<DryRunTransactionBlockResponse> {
+    this.transaction.setSender(this.sender);
+    return this.iotaClient.dryRunTransactionBlock({
+      transactionBlock: await this.transaction.build({
+        client: this.iotaClient,
+      }),
+    });
+  }
+
+  async signAndExecuteTransaction(
+    signer: Keypair,
+    options?: IotaTransactionBlockResponseOptions,
+  ): Promise<IotaTransactionBlockResponse> {
+    if (signer.toIotaAddress() !== this.sender) {
+      throw new Error("Invalid signer");
+    }
+    return this.iotaClient.signAndExecuteTransaction({
+      transaction: this.transaction,
+      signer,
+      options,
+    });
   }
 
   treasuryObj(): TransactionArgument {

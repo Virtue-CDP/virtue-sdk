@@ -1,6 +1,7 @@
 import { Transaction, TransactionResult, TransactionArgument } from '@iota/iota-sdk/transactions';
-import { IotaClient, IotaObjectData, IotaParsedData, IotaObjectResponse, IotaMoveObject } from '@iota/iota-sdk/client';
+import { IotaClient, DryRunTransactionBlockResponse, IotaTransactionBlockResponseOptions, IotaTransactionBlockResponse, IotaObjectData, IotaParsedData, IotaObjectResponse, IotaMoveObject } from '@iota/iota-sdk/client';
 import { IotaPriceServiceConnection, IotaPythClient } from '@pythnetwork/pyth-iota-js';
+import { Keypair } from '@iota/iota-sdk/cryptography';
 import * as superstruct from 'superstruct';
 import { Infer } from 'superstruct';
 
@@ -229,6 +230,8 @@ declare class VirtueClient {
      * @returns Transaction
      */
     getTransaction(): Transaction;
+    dryrunTransaction(): Promise<DryRunTransactionBlockResponse>;
+    signAndExecuteTransaction(signer: Keypair, options?: IotaTransactionBlockResponseOptions): Promise<IotaTransactionBlockResponse>;
     treasuryObj(): TransactionArgument;
     clockObj(): TransactionArgument;
     vaultObj(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
