@@ -50,3 +50,22 @@ export type VaultObjectInfo = {
 };
 
 export type Rewarder = SharedObjectRef & { rewardSymbol: COIN };
+
+export type CdpPositionsResponse = {
+  positions: {
+    debtor: string;
+    collAmount: number;
+    debtAmount: number;
+  }[];
+  nextCursor: string | null;
+};
+
+export type PoolPositionsResponse = {
+  positions: {
+    account: string;
+    vusdAmount: number;
+    collAmounts: Record<string, number>;
+    timestamp: number;
+  }[];
+  nextCursor: string | null;
+};

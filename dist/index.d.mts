@@ -84,6 +84,23 @@ type VaultObjectInfo = {
 type Rewarder = SharedObjectRef & {
     rewardSymbol: COIN;
 };
+type CdpPositionsResponse = {
+    positions: {
+        debtor: string;
+        collAmount: number;
+        debtAmount: number;
+    }[];
+    nextCursor: string | null;
+};
+type PoolPositionsResponse = {
+    positions: {
+        account: string;
+        vusdAmount: number;
+        collAmounts: Record<string, number>;
+        timestamp: number;
+    }[];
+    nextCursor: string | null;
+};
 
 declare const COIN_DECIMALS: Record<COIN, number>;
 
@@ -183,6 +200,14 @@ declare class VirtueClient {
      * @description Get reward amounts from stability pool incentive program
      */
     getStabilityPoolRewards(account?: string): Promise<Rewards>;
+    /**
+     * @description Get CDP Positions
+     */
+    getCdpPositions({ coinSymbol, pageSize, cursor, }: {
+        coinSymbol: COLLATERAL_COIN;
+        pageSize: number;
+        cursor?: string | null;
+    }): Promise<CdpPositionsResponse>;
     /**
      * @description new zero coin
      */
@@ -400,4 +425,4 @@ declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
 
-export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type ConfigType, type DEPOSIT_POINT_BONUS_COIN, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PositionInfo, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, isDepositPointBonusCoin, parseUnits, parseVaultObject };
+export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, type DEPOSIT_POINT_BONUS_COIN, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, isDepositPointBonusCoin, parseUnits, parseVaultObject };

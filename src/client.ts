@@ -5,7 +5,7 @@ import {
 } from "@iota/iota-sdk/transactions";
 import { getFullnodeUrl, IotaClient } from "@iota/iota-sdk/client";
 
-import { CONFIG, ConfigType } from "@/constants";
+import { COIN_DECIMALS, CONFIG, ConfigType } from "@/constants";
 import {
   VaultInfo,
   VaultResponse,
@@ -18,6 +18,7 @@ import {
   Rewards,
   isDepositPointBonusCoin,
   DEPOSIT_POINT_BONUS_COIN,
+  CdpPositionsResponse,
 } from "@/types";
 import { getObjectFields, parseVaultObject } from "@/utils";
 import {
@@ -38,6 +39,15 @@ const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
 };
 
 const DUMMY_ADDRESS = normalizeIotaAddress("0x0");
+
+const CDP_POSITION_DATA = bcs.struct(
+  "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1::vault::PositionData",
+  {
+    debtor: bcs.Address,
+    coll_amount: bcs.U64,
+    debt_amount: bcs.U64,
+  },
+);
 
 export class VirtueClient {
   /**
@@ -351,6 +361,62 @@ export class VirtueClient {
       }
     });
     return rewards;
+  }
+
+  /**
+   * @description Get CDP Positions
+   */
+  async getCdpPositions({
+    coinSymbol,
+    pageSize,
+    cursor,
+  }: {
+    coinSymbol: COLLATERAL_COIN;
+    pageSize: number;
+    cursor?: string | null;
+  }): Promise<CdpPositionsResponse> {
+    const tx = new Transaction();
+    const vaultInfo = this.config.VAULT_MAP[coinSymbol];
+    const coinType = this.config.COIN_TYPES[coinSymbol];
+    tx.moveCall({
+      target: `${this.config.CDP_PACKAGE_ID}::vault::get_positions`,
+      typeArguments: [coinType],
+      arguments: [
+        tx.sharedObjectRef(vaultInfo.vault),
+        tx.sharedObjectRef(this.config.CLOCK_OBJ),
+        tx.pure.option("address", cursor),
+        tx.pure.u64(pageSize),
+      ],
+    });
+    const res = await this.getIotaClient().devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: this.sender,
+    });
+    if (!res.results || !res.results[0]?.returnValues) {
+      return {
+        positions: [],
+        nextCursor: null,
+      };
+    }
+    const [positionBytes, nextCursorBytes] = res.results[0].returnValues;
+    const positions = (
+      bcs
+        .vector(CDP_POSITION_DATA)
+        .parse(Uint8Array.from(positionBytes ? positionBytes[0] : [])) as any[]
+    ).map((pos) => {
+      return {
+        debtor: pos.debtor,
+        collAmount: Number(pos.coll_amount) / 10 ** COIN_DECIMALS[coinSymbol],
+        debtAmount: Number(pos.debt_amount) / 10 ** COIN_DECIMALS.VUSD,
+      };
+    });
+    const nextCursor = bcs
+      .option(bcs.Address)
+      .parse(Uint8Array.from(nextCursorBytes ? nextCursorBytes[0] : []));
+    return {
+      positions,
+      nextCursor,
+    };
   }
 
   /* ----- Transaction Utils ----- */
