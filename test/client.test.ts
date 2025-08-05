@@ -67,4 +67,17 @@ describe("Interacting with VirtueClient", () => {
       ),
     ).toBeTruthy();
   }, 15000);
+
+  // it("test getStabilityPoolPositions() function", async () => {
+  //   const pageSize = 100;
+  //   const res = await client.getStabilityPoolPositions({ pageSize });
+  //   expect(res.positions.length).toBeLessThanOrEqual(pageSize);
+  //   const myPosition = res.positions.find(
+  //     (pos) =>
+  //       pos.account ===
+  //       "0x99117af9eff00799ec35a0bc3039219617e2e22a2ddccee8704ffffbaf3b7800",
+  //   );
+  //   expect(myPosition).toBeDefined();
+  //   expect(myPosition?.vusdAmount === 100_007.963229);
+  // });
 });

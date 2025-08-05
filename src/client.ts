@@ -25,6 +25,7 @@ import {
   isDepositPointBonusCoin,
   DEPOSIT_POINT_BONUS_COIN,
   CdpPositionsResponse,
+  PoolPositionsResponse,
 } from "@/types";
 import { getObjectFields, parseVaultObject } from "@/utils";
 import {
@@ -47,14 +48,23 @@ const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
 
 const DUMMY_ADDRESS = normalizeIotaAddress("0x0");
 
-const CDP_POSITION_DATA = bcs.struct(
-  "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1::vault::PositionData",
-  {
-    debtor: bcs.Address,
-    coll_amount: bcs.U64,
-    debt_amount: bcs.U64,
-  },
-);
+const TYPE_NAME_STRUCT = bcs.struct("TypeName", {
+  name: bcs.String,
+});
+
+const CDP_POSITION_DATA = bcs.struct("CdpPositionData", {
+  debtor: bcs.Address,
+  coll_amount: bcs.U64,
+  debt_amount: bcs.U64,
+});
+
+const POOL_POSITION_DATA = bcs.struct("StabilityPoolPositionData", {
+  account: bcs.Address,
+  vusd_balance: bcs.U64,
+  coll_types: bcs.vector(TYPE_NAME_STRUCT),
+  coll_amounts: bcs.vector(bcs.U64),
+  timestamp: bcs.U64,
+});
 
 export class VirtueClient {
   /**
@@ -424,6 +434,59 @@ export class VirtueClient {
       positions,
       nextCursor,
     };
+  }
+
+  /**
+   * @description Get CDP Positions
+   */
+  async getStabilityPoolPositions({
+    pageSize,
+    cursor,
+  }: {
+    pageSize: number;
+    cursor?: string | null;
+  }): Promise<PoolPositionsResponse> {
+    const tx = new Transaction();
+    tx.moveCall({
+      target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::get_positions`,
+      arguments: [
+        tx.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
+        tx.pure.option("address", cursor),
+        tx.pure.u64(pageSize),
+      ],
+    });
+    const res = await this.getIotaClient().devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: this.sender,
+    });
+    if (!res.results || !res.results[0]?.returnValues) {
+      return {
+        positions: [],
+        nextCursor: null,
+      };
+    }
+    const [positionVec, nextCursorVec] = res.results[0].returnValues;
+    const positions = (
+      bcs
+        .vector(POOL_POSITION_DATA)
+        .parse(Uint8Array.from(positionVec ? positionVec[0] : [])) as any[]
+    ).map((pos) => {
+      const collAmounts: Record<string, number> = {};
+      (pos.coll_types as any[]).map(
+        (t, idx) =>
+          (collAmounts["0x" + t.fields.name] = Number(pos.coll_amounts[idx])),
+      );
+      return {
+        account: pos.account,
+        vusdAmount: Number(pos.vusd_balance),
+        collAmounts,
+        timestamp: Number(pos.timestamp),
+      };
+    });
+    const nextCursor = bcs
+      .option(bcs.Address)
+      .parse(Uint8Array.from(nextCursorVec ? nextCursorVec[0] : []));
+    return { positions, nextCursor };
   }
 
   /* ----- Transaction Utils ----- */

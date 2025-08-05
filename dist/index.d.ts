@@ -210,6 +210,13 @@ declare class VirtueClient {
         cursor?: string | null;
     }): Promise<CdpPositionsResponse>;
     /**
+     * @description Get CDP Positions
+     */
+    getStabilityPoolPositions({ pageSize, cursor, }: {
+        pageSize: number;
+        cursor?: string | null;
+    }): Promise<PoolPositionsResponse>;
+    /**
      * @description new zero coin
      */
     zeroCoin(coinSymbol: COIN): TransactionResult;

@@ -397,14 +397,21 @@ var getCoinSymbol2 = (coinType, coinTypes) => {
   return void 0;
 };
 var DUMMY_ADDRESS = _utils.normalizeIotaAddress.call(void 0, "0x0");
-var CDP_POSITION_DATA = _bcs.bcs.struct(
-  "0xcdeeb40cd7ffd7c3b741f40a8e11cb784a5c9b588ce993d4ab86479072386ba1::vault::PositionData",
-  {
-    debtor: _bcs.bcs.Address,
-    coll_amount: _bcs.bcs.U64,
-    debt_amount: _bcs.bcs.U64
-  }
-);
+var TYPE_NAME_STRUCT = _bcs.bcs.struct("TypeName", {
+  name: _bcs.bcs.String
+});
+var CDP_POSITION_DATA = _bcs.bcs.struct("CdpPositionData", {
+  debtor: _bcs.bcs.Address,
+  coll_amount: _bcs.bcs.U64,
+  debt_amount: _bcs.bcs.U64
+});
+var POOL_POSITION_DATA = _bcs.bcs.struct("StabilityPoolPositionData", {
+  account: _bcs.bcs.Address,
+  vusd_balance: _bcs.bcs.U64,
+  coll_types: _bcs.bcs.vector(TYPE_NAME_STRUCT),
+  coll_amounts: _bcs.bcs.vector(_bcs.bcs.U64),
+  timestamp: _bcs.bcs.U64
+});
 var VirtueClient = class {
   constructor(inputs) {
     const { network, rpcUrl, sender } = _nullishCoalesce(inputs, () => ( {}));
@@ -703,6 +710,48 @@ var VirtueClient = class {
       positions,
       nextCursor
     };
+  }
+  /**
+   * @description Get CDP Positions
+   */
+  async getStabilityPoolPositions({
+    pageSize,
+    cursor
+  }) {
+    const tx = new (0, _transactions.Transaction)();
+    tx.moveCall({
+      target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::get_positions`,
+      arguments: [
+        tx.sharedObjectRef(this.config.STABILITY_POOL_OBJ),
+        tx.pure.option("address", cursor),
+        tx.pure.u64(pageSize)
+      ]
+    });
+    const res = await this.getIotaClient().devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: this.sender
+    });
+    if (!res.results || !_optionalChain([res, 'access', _23 => _23.results, 'access', _24 => _24[0], 'optionalAccess', _25 => _25.returnValues])) {
+      return {
+        positions: [],
+        nextCursor: null
+      };
+    }
+    const [positionVec, nextCursorVec] = res.results[0].returnValues;
+    const positions = _bcs.bcs.vector(POOL_POSITION_DATA).parse(Uint8Array.from(positionVec ? positionVec[0] : [])).map((pos) => {
+      const collAmounts = {};
+      pos.coll_types.map(
+        (t, idx) => collAmounts["0x" + t.fields.name] = Number(pos.coll_amounts[idx])
+      );
+      return {
+        account: pos.account,
+        vusdAmount: Number(pos.vusd_balance),
+        collAmounts,
+        timestamp: Number(pos.timestamp)
+      };
+    });
+    const nextCursor = _bcs.bcs.option(_bcs.bcs.Address).parse(Uint8Array.from(nextCursorVec ? nextCursorVec[0] : []));
+    return { positions, nextCursor };
   }
   /* ----- Transaction Utils ----- */
   /**
