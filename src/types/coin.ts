@@ -1,5 +1,5 @@
-export type COIN = "IOTA" | "stIOTA" | "VUSD";
-export type COLLATERAL_COIN = "IOTA" | "stIOTA";
+export type COIN = "VUSD" | "IOTA" | "stIOTA" | "IBTC";
+export type COLLATERAL_COIN = "IOTA" | "stIOTA" | "IBTC";
 
 export type DEPOSIT_POINT_BONUS_COIN = Extract<COIN, "stIOTA">;
 

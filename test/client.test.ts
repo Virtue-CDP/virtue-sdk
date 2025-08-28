@@ -4,13 +4,20 @@ import { VirtueClient } from "../src/index";
 describe("Interacting with VirtueClient", () => {
   // Instantiate Client
   const walletAddress =
-    "0x6ff423cb66243ef1fb02dff88aeed580362e2b28f59b92e10b81074b49bea4e1";
+    "0xf67d0193e9cd65c3c8232dbfe0694eb9e14397326bdc362a4fe9d590984f5a12";
   const client = new VirtueClient({ sender: walletAddress });
 
   it("test getAllVaults() function", async () => {
     const vaults = await client.getAllVaults();
     console.log(vaults);
     expect(vaults).toBeDefined();
+  });
+
+  it("test aggregatePrice() function", async () => {
+    client.resetTransaction();
+    await client.aggregatePrice("IBTC");
+    const dryrunRes = await client.dryrunTransaction();
+    expect(dryrunRes.effects.status.status).toBe("success");
   });
 
   it("test getVault() function", async () => {
