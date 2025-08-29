@@ -5,8 +5,8 @@ import { Keypair } from '@iota/iota-sdk/cryptography';
 import * as superstruct from 'superstruct';
 import { Infer } from 'superstruct';
 
-type COIN = "VUSD" | "IOTA" | "stIOTA" | "IBTC";
-type COLLATERAL_COIN = "IOTA" | "stIOTA" | "IBTC";
+type COIN = "VUSD" | "IOTA" | "stIOTA" | "iBTC";
+type COLLATERAL_COIN = "IOTA" | "stIOTA" | "iBTC";
 type DEPOSIT_POINT_BONUS_COIN = Extract<COIN, "stIOTA">;
 declare function isDepositPointBonusCoin(coin: COIN): coin is DEPOSIT_POINT_BONUS_COIN;
 
