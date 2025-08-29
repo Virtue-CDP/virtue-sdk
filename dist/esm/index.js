@@ -12,7 +12,7 @@ var COIN_DECIMALS = {
   VUSD: 6,
   IOTA: 9,
   stIOTA: 9,
-  IBTC: 10
+  iBTC: 10
 };
 
 // src/constants/object.ts
@@ -22,7 +22,7 @@ var CONFIG = {
       VUSD: "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f::vusd::VUSD",
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA: "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
-      IBTC: "0x387c459c5c947aac7404e53ba69541c5d64f3cf96f3bc515e7f8a067fb725b54::ibtc::IBTC"
+      iBTC: "0x387c459c5c947aac7404e53ba69541c5d64f3cf96f3bc515e7f8a067fb725b54::iBTC::iBTC"
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID: "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b",
     ORIGINAL_VUSD_PACKAGE_ID: "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f",
@@ -143,7 +143,7 @@ var CONFIG = {
           }
         ]
       },
-      IBTC: {
+      iBTC: {
         priceAggregater: {
           objectId: "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
           initialSharedVersion: 172291113,
@@ -163,7 +163,7 @@ var CONFIG = {
       VUSD: "0x3fbd238eea1f4ce7d797148954518fce853f24a8be01b47388bfa2262602fefa::vusd::VUSD",
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA: "0x14f9e69c0076955d5a056260c9667edab184650dba9919f168a37030dd956dc6::cert::CERT",
-      IBTC: ""
+      iBTC: ""
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID: "0x5e1fb08bd2360286cd13dd174f6d17aa8871b08906aa8001079199ad62ad81b1",
     ORIGINAL_VUSD_PACKAGE_ID: "0x3fbd238eea1f4ce7d797148954518fce853f24a8be01b47388bfa2262602fefa",
@@ -266,7 +266,7 @@ var CONFIG = {
         },
         rewarders: []
       },
-      IBTC: {
+      iBTC: {
         priceAggregater: {
           objectId: "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
           initialSharedVersion: 172291113,

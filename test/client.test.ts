@@ -15,7 +15,7 @@ describe("Interacting with VirtueClient", () => {
 
   it("test aggregatePrice() function", async () => {
     client.resetTransaction();
-    await client.aggregatePrice("IBTC");
+    await client.aggregatePrice("iBTC");
     const dryrunRes = await client.dryrunTransaction();
     expect(dryrunRes.effects.status.status).toBe("success");
   });
