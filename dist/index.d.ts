@@ -174,6 +174,10 @@ declare class VirtueClient {
      */
     getPythClient(): IotaPythClient;
     /**
+     * @description
+     */
+    getPrice(symbol: COLLATERAL_COIN): Promise<number>;
+    /**
      * @description Get all vault objects
      */
     getAllVaults(): Promise<VaultInfoList>;

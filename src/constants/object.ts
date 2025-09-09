@@ -210,15 +210,15 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           initialSharedVersion: 22329896,
           mutable: true,
         },
-        rewarders: [
-          {
-            objectId:
-              "0xf9ac7f70f1e364cd31734f5a3ebf5c580d3da11c06ca6d7832e82cc417e022eb",
-            initialSharedVersion: 121322517,
-            mutable: true,
-            rewardSymbol: "stIOTA",
-          },
-        ],
+        // rewarders: [
+        //   {
+        //     objectId:
+        //       "0xf9ac7f70f1e364cd31734f5a3ebf5c580d3da11c06ca6d7832e82cc417e022eb",
+        //     initialSharedVersion: 121322517,
+        //     mutable: true,
+        //     rewardSymbol: "stIOTA",
+        //   },
+        // ],
       },
       iBTC: {
         priceAggregater: {

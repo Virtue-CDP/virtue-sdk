@@ -128,6 +128,29 @@ export class VirtueClient {
   /* ----- Query ----- */
 
   /**
+   * @description
+   */
+  async getPrice(symbol: COLLATERAL_COIN): Promise<number> {
+    this.resetTransaction();
+    await this.aggregatePrice(symbol);
+    this.transaction.setSender(DUMMY_ADDRESS);
+    const dryrunRes = await this.dryrunTransaction();
+    this.resetTransaction();
+    console.log(dryrunRes.events);
+    const priceResult = dryrunRes.events.find((e) =>
+      e.type.includes("PriceAggregated"),
+    );
+    console.log(priceResult);
+    const pricePrecision = 10 ** 9;
+
+    if (priceResult) {
+      return +(priceResult.parsedJson as any).result / pricePrecision;
+    } else {
+      return 0;
+    }
+  }
+
+  /**
    * @description Get all vault objects
    */
   async getAllVaults(): Promise<VaultInfoList> {
