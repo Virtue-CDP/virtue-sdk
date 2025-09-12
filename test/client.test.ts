@@ -26,10 +26,27 @@ describe("Interacting with VirtueClient", () => {
     expect(vault).toBeDefined();
   });
 
-  it("test ManagePosition() function (deposit and borrow)", async () => {
+  it("test ManagePosition() function (deposit)", async () => {
     const tx = await client.buildManagePositionTransaction({
       collateralSymbol: "stIOTA",
       depositAmount: "1000000000", // 1 stIOTA
+      borrowAmount: "0", // 0.01 vUSD
+      repaymentAmount: "0",
+      withdrawAmount: "0",
+    });
+    expect(tx).toBeDefined();
+    tx.setSender(client.sender);
+    const dryrunRes = await client.getIotaClient().dryRunTransactionBlock({
+      transactionBlock: await tx.build({ client: client.getIotaClient() }),
+    });
+    assert(dryrunRes.effects.status.status === "success");
+    // console.log(dryrunRes.objectChanges);
+  }, 15000);
+
+  it("test ManagePosition() function (borrow)", async () => {
+    const tx = await client.buildManagePositionTransaction({
+      collateralSymbol: "stIOTA",
+      depositAmount: "0", // 1 stIOTA
       borrowAmount: "10000", // 0.01 vUSD
       repaymentAmount: "0",
       withdrawAmount: "0",
@@ -43,12 +60,29 @@ describe("Interacting with VirtueClient", () => {
     // console.log(dryrunRes.objectChanges);
   }, 15000);
 
-  it("test ManagePosition() function (repay and withdraw)", async () => {
+  it("test ManagePosition() function (repay)", async () => {
     const tx = await client.buildManagePositionTransaction({
       collateralSymbol: "stIOTA",
       depositAmount: "0",
       borrowAmount: "0",
       repaymentAmount: "1000000", // 1 VUSD
+      withdrawAmount: "0", // 1 stIOTA
+    });
+    expect(tx).toBeDefined();
+    tx.setSender(client.sender);
+    const dryrunRes = await client.getIotaClient().dryRunTransactionBlock({
+      transactionBlock: await tx.build({ client: client.getIotaClient() }),
+    });
+    assert(dryrunRes.effects.status.status === "success");
+    // console.log(dryrunRes.objectChanges);
+  }, 15000);
+
+  it("test ManagePosition() function (withdraw)", async () => {
+    const tx = await client.buildManagePositionTransaction({
+      collateralSymbol: "stIOTA",
+      depositAmount: "0",
+      borrowAmount: "0",
+      repaymentAmount: "0", // 1 VUSD
       withdrawAmount: "1000000000", // 1 stIOTA
     });
     expect(tx).toBeDefined();

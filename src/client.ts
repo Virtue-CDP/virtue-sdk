@@ -1062,7 +1062,7 @@ export class VirtueClient {
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       const priceResult = await this.aggregatePrice(collateralSymbol);
-      const updateRequest = this.debtorRequest({
+      let updateRequest = this.debtorRequest({
         collateralSymbol,
         depositCoin,
         borrowAmount,
@@ -1070,13 +1070,13 @@ export class VirtueClient {
         withdrawAmount,
         accountObj: accountObjId,
       });
-      const checkedUpdateRequest = this.checkRequest({
+      updateRequest = this.checkRequest({
         collateralSymbol,
         request: updateRequest,
       });
       const [collCoin, vusdCoin, response] = this.updatePosition({
         collateralSymbol,
-        updateRequest: checkedUpdateRequest,
+        updateRequest,
         priceResult,
       });
       // emit point
@@ -1109,13 +1109,17 @@ export class VirtueClient {
       this.resetTransaction();
       return tx;
     } else {
-      const updateRequest = this.debtorRequest({
+      let updateRequest = this.debtorRequest({
         collateralSymbol,
         depositCoin,
         borrowAmount,
         repaymentCoin,
         withdrawAmount,
         accountObj: accountObjId,
+      });
+      updateRequest = this.checkRequest({
+        collateralSymbol,
+        request: updateRequest,
       });
       const [collCoin, vusdCoin, response] = this.updatePosition({
         collateralSymbol,
