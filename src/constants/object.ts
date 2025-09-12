@@ -28,7 +28,6 @@ export type ConfigType = {
   CLOCK_OBJ: SharedObjectRef;
   TREASURY_OBJ: SharedObjectRef;
   STABILITY_POOL_OBJ: SharedObjectRef;
-  INCENTIVE_GLOBAL_CONFIG_OBJ: SharedObjectRef;
   VAULT_REWARDER_REGISTRY_OBJ: SharedObjectRef;
   POOL_REWARDER_REGISTRY_OBJ: SharedObjectRef;
 
@@ -71,7 +70,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     ORIGINAL_STABILITY_POOL_PACKAGE_ID:
       "0xc7ab9b9353e23c6a3a15181eb51bf7145ddeff1a5642280394cd4d6a0d37d83b",
     ORIGINAL_INCENTIVE_PACKAGE_ID:
-      "0xe66a8a84964f758fd1b2154d68247277a14983c90a810c8fd9e6263116f15019",
+      "0x86aa277cf34776edba2ccf29b2c61a1b49d652a34c5a2321e787ca717412fd10",
     ORIGINAL_POINT_PACKAGE_ID:
       "0x745a1c670fd04d9e71b43a3593a855c79af5e6aa6979d1029f35ec9baa344c1e",
 
@@ -82,11 +81,11 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     ORACLE_PACKAGE_ID:
       "0x7eebbee92f64ba2912bdbfba1864a362c463879fc5b3eacc735c1dcb255cc2cf",
     CDP_PACKAGE_ID:
-      "0x34fa327ee4bb581d81d85a8c40b6a6b4260630a0ef663acfe6de0e8ca471dd22",
+      "0xb0ca01917f84a07774397395467fc2d56de377fab9d603cb79b82f062d1f6e9a",
     STABILITY_POOL_PACKAGE_ID:
-      "0xb80b111f3dfb35ea26bd288e187af349c4e5b74a5fda143066f5ff9de84f34bf",
+      "0xe50fa492446245d9dd4bc61641a4ab2e72cd1276703d6ae8e41377a046b0929b",
     INCENTIVE_PACKAGE_ID:
-      "0xfd50d23504c5a3ad290357f9cbce4a0a3645ab25fc3a11e939126d331267fe29",
+      "0x86aa277cf34776edba2ccf29b2c61a1b49d652a34c5a2321e787ca717412fd10",
     POINT_PACKAGE_ID:
       "0x745a1c670fd04d9e71b43a3593a855c79af5e6aa6979d1029f35ec9baa344c1e",
 
@@ -108,22 +107,16 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       initialSharedVersion: 22329903,
       mutable: true,
     },
-    INCENTIVE_GLOBAL_CONFIG_OBJ: {
-      objectId:
-        "0xc30c82b96429c2c215dbc994e73250c8b29e747c9540a547c7bc95e6d7e098d8",
-      initialSharedVersion: 120165683,
-      mutable: false,
-    },
     VAULT_REWARDER_REGISTRY_OBJ: {
       objectId:
-        "0x3b5a6649ce2c4348ae7d2dc72bc8e42cecfc6c24b9edb701635f9c49c765ff69",
-      initialSharedVersion: 120165683,
+        "0x453e1e9deb1873b3a79a9e60ce0c7ffe06b28387f4b1d9f8afaf7d4c8e1c7462",
+      initialSharedVersion: 196734342,
       mutable: false,
     },
     POOL_REWARDER_REGISTRY_OBJ: {
       objectId:
-        "0xc043719e2da72c1182466bbccf01b966d500337749cd6a06e042714444d2852c",
-      initialSharedVersion: 120165683,
+        "0x7e63835296d4585c98c29afcd9cb45fe96da04cf09c8235b26135ecac245515c",
+      initialSharedVersion: 196734342,
       mutable: false,
     },
     PYTH_STATE_ID:
@@ -173,9 +166,9 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     STABILITY_POOL_REWARDERS: [
       {
         objectId:
-          "0xb295972b5c978ebb96339b81a762cbc047be78747c2f7d19e661281560394c2b",
+          "0xd34d8de1558ebd521382a92fa4824bb00cf97cdfaba2a0a9843f2e5a03b4e430",
         mutable: true,
-        initialSharedVersion: 121322519,
+        initialSharedVersion: 196762084,
         rewardSymbol: "stIOTA",
       },
     ],
@@ -210,15 +203,15 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           initialSharedVersion: 22329896,
           mutable: true,
         },
-        // rewarders: [
-        //   {
-        //     objectId:
-        //       "0xf9ac7f70f1e364cd31734f5a3ebf5c580d3da11c06ca6d7832e82cc417e022eb",
-        //     initialSharedVersion: 121322517,
-        //     mutable: true,
-        //     rewardSymbol: "stIOTA",
-        //   },
-        // ],
+        rewarders: [
+          {
+            objectId:
+              "0x5752324b10b19792528af301bd65128f22dc30562e8a67b9e33da49bd7aff1d9",
+            initialSharedVersion: 196762083,
+            mutable: true,
+            rewardSymbol: "stIOTA",
+          },
+        ],
       },
       iBTC: {
         priceAggregater: {
@@ -285,11 +278,6 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
         "0xcdc4dca9a7a481d5f9f586177ca75d34a62d9c9371c97a3f4fb330a13d8995b4",
       initialSharedVersion: 265495176,
       mutable: true,
-    },
-    INCENTIVE_GLOBAL_CONFIG_OBJ: {
-      objectId: "",
-      initialSharedVersion: 0,
-      mutable: false,
     },
     VAULT_REWARDER_REGISTRY_OBJ: {
       objectId: "",
