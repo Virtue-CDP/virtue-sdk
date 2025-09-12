@@ -319,7 +319,8 @@ declare class VirtueClient {
      */
     depositStabilityPool(inputs: {
         vusdCoin: TransactionArgument;
-        recipient?: string;
+        accountRequest?: TransactionArgument;
+        accountObj?: string | TransactionArgument;
     }): TransactionArgument;
     /**
      * @description withdraw from stability pool
@@ -386,7 +387,7 @@ declare class VirtueClient {
      */
     buildDepositStabilityPoolTransaction(inputs: {
         depositAmount: string;
-        recipient?: string;
+        accountObjId?: string;
         keepTransaction?: boolean;
     }): Promise<Transaction>;
     /**

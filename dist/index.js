@@ -477,11 +477,9 @@ var VirtueClient = class {
     this.transaction.setSender(DUMMY_ADDRESS);
     const dryrunRes = await this.dryrunTransaction();
     this.resetTransaction();
-    console.log(dryrunRes.events);
     const priceResult = dryrunRes.events.find(
       (e) => e.type.includes("PriceAggregated")
     );
-    console.log(priceResult);
     const pricePrecision = 10 ** 9;
     if (priceResult) {
       return +priceResult.parsedJson.result / pricePrecision;
@@ -586,7 +584,7 @@ var VirtueClient = class {
     if (!fields) {
       return { vusdBalance: 0 };
     }
-    return { vusdBalance: fields.vusd_balance };
+    return { vusdBalance: Number(fields.vusd_balance) };
   }
   /**
    * @description Get user's balances in stability pool
@@ -1126,13 +1124,14 @@ var VirtueClient = class {
    * @returns PositionResponse
    */
   depositStabilityPool(inputs) {
-    const { vusdCoin, recipient } = inputs;
+    const { vusdCoin, accountRequest, accountObj } = inputs;
+    const accountReq = accountRequest ? accountRequest : this.newAccountRequest(accountObj);
     return this.transaction.moveCall({
       target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::deposit_and_update`,
       arguments: [
         this.stabilityPoolObj(),
         this.transaction.object.clock(),
-        this.transaction.pure.address(_nullishCoalesce(recipient, () => ( this.sender))),
+        accountReq,
         vusdCoin
       ]
     });
@@ -1210,7 +1209,7 @@ var VirtueClient = class {
       positionResponse = responseAfterIncentive;
     }
     this.transaction.moveCall({
-      target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::check_response`,
+      target: `${this.config.STABILITY_POOL_PACKAGE_ID}::stability_pool::check_update_response`,
       arguments: [this.stabilityPoolObj(), positionResponse]
     });
   }
@@ -1255,9 +1254,13 @@ var VirtueClient = class {
         withdrawAmount,
         accountObj: accountObjId
       });
+      const checkedUpdateRequest = this.checkRequest({
+        collateralSymbol,
+        request: updateRequest
+      });
       const [collCoin, vusdCoin, response] = this.updatePosition({
         collateralSymbol,
-        updateRequest,
+        updateRequest: checkedUpdateRequest,
         priceResult
       });
       if (isDepositPointBonusCoin(collateralSymbol))
@@ -1270,7 +1273,10 @@ var VirtueClient = class {
       }
       if (Number(borrowAmount) > 0) {
         if (recipient === "StabilityPool") {
-          const response2 = this.depositStabilityPool({ vusdCoin, recipient });
+          const response2 = this.depositStabilityPool({
+            vusdCoin,
+            accountObj: accountObjId
+          });
           this.checkResponseForStabilityPool(response2);
         } else {
           this.transaction.transferObjects(
@@ -1360,12 +1366,15 @@ var VirtueClient = class {
    * @returns Transaction
    */
   async buildDepositStabilityPoolTransaction(inputs) {
-    const { depositAmount, recipient, keepTransaction } = inputs;
+    const { depositAmount, accountObjId, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     this.transaction.setSender(this.sender);
     const [vusdCoin] = await this.splitInputCoins("VUSD", depositAmount);
-    const response = this.depositStabilityPool({ vusdCoin, recipient });
+    const response = this.depositStabilityPool({
+      vusdCoin,
+      accountObj: accountObjId
+    });
     this.checkResponseForStabilityPool(response);
     const tx = this.getTransaction();
     if (!keepTransaction) this.resetTransaction();
