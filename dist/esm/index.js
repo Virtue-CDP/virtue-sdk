@@ -477,7 +477,7 @@ var VirtueClient = class {
     this.transaction.setSender(DUMMY_ADDRESS);
     const dryrunRes = await this.dryrunTransaction();
     this.resetTransaction();
-    const priceResult = dryrunRes.events.find(
+    const priceResult = dryrunRes.events.findLast(
       (e) => e.type.includes("PriceAggregated")
     );
     const pricePrecision = 10 ** 9;

@@ -26,6 +26,13 @@ describe("Interacting with VirtueClient", () => {
     expect(vault).toBeDefined();
   });
 
+  it("test getPrice() function", async () => {
+    const stIotaPrice = await client.getPrice("stIOTA");
+    const iotaPrice = await client.getPrice("IOTA");
+    console.log(stIotaPrice, iotaPrice);
+    expect(stIotaPrice).toBeGreaterThan(iotaPrice);
+  });
+
   it("test ManagePosition() function (deposit)", async () => {
     const tx = await client.buildManagePositionTransaction({
       collateralSymbol: "stIOTA",
