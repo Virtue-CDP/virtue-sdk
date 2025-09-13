@@ -172,10 +172,11 @@ declare class VirtueClient {
      * @description Get this.pythClient
      */
     getPythClient(): IotaPythClient;
+    getAllCollateralSymbol(): COLLATERAL_COIN[];
     /**
      * @description
      */
-    getPrice(symbol: COLLATERAL_COIN): Promise<number>;
+    getCollateralPrices(): Promise<Record<COLLATERAL_COIN, number>>;
     /**
      * @description Get all vault objects
      */
@@ -262,7 +263,7 @@ declare class VirtueClient {
      * @param collateral coin symbol, e.g "IOTA"
      * @return [PriceResult]
      */
-    aggregatePrice(collateralSymbol: COLLATERAL_COIN): Promise<TransactionArgument>;
+    aggregatePrices(): Promise<Record<COLLATERAL_COIN, TransactionResult>>;
     /**
      * @description Get a request to Mange Position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"

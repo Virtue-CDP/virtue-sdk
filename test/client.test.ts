@@ -15,9 +15,10 @@ describe("Interacting with VirtueClient", () => {
 
   it("test aggregatePrice() function", async () => {
     client.resetTransaction();
-    await client.aggregatePrice("iBTC");
+    await client.aggregatePrices();
     const dryrunRes = await client.dryrunTransaction();
     expect(dryrunRes.effects.status.status).toBe("success");
+    client.resetTransaction();
   });
 
   it("test getVault() function", async () => {
@@ -27,10 +28,9 @@ describe("Interacting with VirtueClient", () => {
   });
 
   it("test getPrice() function", async () => {
-    const stIotaPrice = await client.getPrice("stIOTA");
-    const iotaPrice = await client.getPrice("IOTA");
-    console.log(stIotaPrice, iotaPrice);
-    expect(stIotaPrice).toBeGreaterThan(iotaPrice);
+    const collateralPrices = await client.getCollateralPrices();
+    console.log(collateralPrices);
+    expect(collateralPrices.stIOTA).toBeGreaterThan(collateralPrices.IOTA);
   });
 
   it("test ManagePosition() function (deposit)", async () => {

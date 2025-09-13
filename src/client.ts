@@ -33,7 +33,7 @@ import {
   IotaPythClient,
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
-import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
+import { normalizeIotaAddress, normalizeStructTag } from "@iota/iota-sdk/utils";
 import { Keypair } from "@iota/iota-sdk/cryptography";
 
 const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
@@ -125,27 +125,40 @@ export class VirtueClient {
     return this.pythClient;
   }
 
+  getAllCollateralSymbol(): COLLATERAL_COIN[] {
+    return Object.keys(this.config.VAULT_MAP) as COLLATERAL_COIN[];
+  }
+
   /* ----- Query ----- */
 
   /**
    * @description
    */
-  async getPrice(symbol: COLLATERAL_COIN): Promise<number> {
+  async getCollateralPrices(): Promise<Record<COLLATERAL_COIN, number>> {
     this.resetTransaction();
-    await this.aggregatePrice(symbol);
+    await this.aggregatePrices();
     this.transaction.setSender(DUMMY_ADDRESS);
     const dryrunRes = await this.dryrunTransaction();
     this.resetTransaction();
-    const priceResult = dryrunRes.events.findLast((e) =>
-      e.type.includes("PriceAggregated"),
-    );
     const pricePrecision = 10 ** 9;
-
-    if (priceResult) {
-      return +(priceResult.parsedJson as any).result / pricePrecision;
-    } else {
-      return 0;
-    }
+    return this.getAllCollateralSymbol().reduce(
+      (result, coinSymbol) => {
+        const coinType = this.config.COIN_TYPES[coinSymbol];
+        const priceEvent = dryrunRes.events.findLast((e) =>
+          normalizeStructTag(e.type).includes(normalizeStructTag(coinType)),
+        );
+        if (priceEvent) {
+          return {
+            ...result,
+            [coinSymbol]:
+              +(priceEvent.parsedJson as any).result / pricePrecision,
+          };
+        } else {
+          return result;
+        }
+      },
+      {} as Record<COLLATERAL_COIN, number>,
+    );
   }
 
   /**
@@ -690,63 +703,77 @@ export class VirtueClient {
    * @param collateral coin symbol, e.g "IOTA"
    * @return [PriceResult]
    */
-  async aggregatePrice(
-    collateralSymbol: COLLATERAL_COIN,
-  ): Promise<TransactionArgument> {
-    const collector = this.newPriceCollector(collateralSymbol);
-    const coinType = this.config.COIN_TYPES[collateralSymbol];
-    const vaultInfo = this.config.VAULT_MAP[collateralSymbol];
-    if (vaultInfo.pythPriceId) {
-      const updateData = await this.pythConnection.getPriceFeedsUpdateData([
-        vaultInfo.pythPriceId,
-      ]);
-      const [priceInfoObjId] = await this.pythClient.updatePriceFeeds(
-        this.transaction as any,
-        updateData,
-        [vaultInfo.pythPriceId],
-      );
-      this.transaction.moveCall({
-        target: `${this.config.PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
-        typeArguments: [coinType],
-        arguments: [
-          collector,
-          this.transaction.sharedObjectRef(this.config.PYTH_RULE_CONFIG_OBJ),
-          this.transaction.object.clock(),
-          this.transaction.object(this.config.PYTH_STATE_ID),
-          this.transaction.object(priceInfoObjId),
-        ],
-      });
-      return this.transaction.moveCall({
-        target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
-        typeArguments: [coinType],
-        arguments: [
-          this.transaction.sharedObjectRef(vaultInfo.priceAggregater),
-          collector,
-        ],
-      });
-    } else if (collateralSymbol === "stIOTA") {
-      const collector = this.newPriceCollector("stIOTA");
-      const iotaPriceResult = await this.aggregatePrice("IOTA");
-      this.transaction.moveCall({
-        target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
-        arguments: [
-          collector,
-          iotaPriceResult,
-          this.transaction.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
-          this.transaction.sharedObjectRef(this.config.CERT_METADATA_OBJ),
-        ],
-      });
-      return this.transaction.moveCall({
-        target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
-        typeArguments: [this.config.COIN_TYPES.stIOTA],
-        arguments: [
-          this.transaction.sharedObjectRef(vaultInfo.priceAggregater),
-          collector,
-        ],
-      });
-    } else {
-      return this.aggregatePrice("IOTA");
-    }
+  async aggregatePrices(): Promise<Record<COLLATERAL_COIN, TransactionResult>> {
+    const basicSymbol: COLLATERAL_COIN[] = ["IOTA", "iBTC"];
+    const pythRuleConfig = this.transaction.sharedObjectRef(
+      this.config.PYTH_RULE_CONFIG_OBJ,
+    );
+    const pythStateObj = this.transaction.object(this.config.PYTH_STATE_ID);
+    const pythPriceIds = basicSymbol.map(
+      (symbol) => this.config.VAULT_MAP[symbol].pythPriceId ?? "",
+    );
+    const updateData =
+      await this.pythConnection.getPriceFeedsUpdateData(pythPriceIds);
+
+    const priceInfoObjIds = await this.pythClient.updatePriceFeeds(
+      this.transaction as any,
+      updateData,
+      pythPriceIds,
+    );
+
+    const basicPriceResults = basicSymbol.reduce(
+      (result, symbol, idx) => {
+        const coinType = this.config.COIN_TYPES[symbol];
+        const collector = this.newPriceCollector(symbol);
+        this.transaction.moveCall({
+          target: `${this.config.PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
+          typeArguments: [coinType],
+          arguments: [
+            collector,
+            pythRuleConfig,
+            this.transaction.object.clock(),
+            pythStateObj,
+            this.transaction.object(priceInfoObjIds[idx]),
+          ],
+        });
+        const priceResult = this.transaction.moveCall({
+          target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+          typeArguments: [coinType],
+          arguments: [
+            this.transaction.sharedObjectRef(
+              this.config.VAULT_MAP[symbol].priceAggregater,
+            ),
+            collector,
+          ],
+        });
+        return { ...result, [symbol]: priceResult };
+      },
+      {} as Record<COLLATERAL_COIN, TransactionResult>,
+    );
+
+    // deal with stIOTA
+    const collector = this.newPriceCollector("stIOTA");
+    this.transaction.moveCall({
+      target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
+      arguments: [
+        collector,
+        basicPriceResults.IOTA,
+        this.transaction.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
+        this.transaction.sharedObjectRef(this.config.CERT_METADATA_OBJ),
+      ],
+    });
+    const stIotaPrice = this.transaction.moveCall({
+      target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+      typeArguments: [this.config.COIN_TYPES.stIOTA],
+      arguments: [
+        this.transaction.sharedObjectRef(
+          this.config.VAULT_MAP.stIOTA.priceAggregater,
+        ),
+        collector,
+      ],
+    });
+
+    return { ...basicPriceResults, stIOTA: stIotaPrice };
   }
 
   /**
@@ -1061,7 +1088,7 @@ export class VirtueClient {
     );
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      const priceResult = await this.aggregatePrice(collateralSymbol);
+      const priceResults = await this.aggregatePrices();
       let updateRequest = this.debtorRequest({
         collateralSymbol,
         depositCoin,
@@ -1077,7 +1104,7 @@ export class VirtueClient {
       const [collCoin, vusdCoin, response] = this.updatePosition({
         collateralSymbol,
         updateRequest,
-        priceResult,
+        priceResult: priceResults[collateralSymbol],
       });
       // emit point
       if (isDepositPointBonusCoin(collateralSymbol))
