@@ -1194,13 +1194,17 @@ export class VirtueClient {
       ],
     });
     const repaymentCoin = await this.splitInputCoins("VUSD", debtAmount);
-    const updateRequest = this.debtorRequest({
+    let updateRequest = this.debtorRequest({
       collateralSymbol,
       depositCoin: this.zeroCoin(collateralSymbol),
       borrowAmount: "0",
       repaymentCoin,
       withdrawAmount: collAmount,
       accountObj: accountObjId,
+    });
+    updateRequest = this.checkRequest({
+      collateralSymbol,
+      request: updateRequest,
     });
     const [collCoin, vusdCoin, response] = this.updatePosition({
       collateralSymbol,
