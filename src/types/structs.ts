@@ -53,6 +53,7 @@ export type Rewarder = SharedObjectRef & { rewardSymbol: COIN };
 
 export type CdpPositionsResponse = {
   positions: {
+    collateralType: string;
     debtor: string;
     collAmount: number;
     debtAmount: number;

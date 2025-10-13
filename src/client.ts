@@ -456,6 +456,7 @@ export class VirtueClient {
         .parse(Uint8Array.from(positionBytes ? positionBytes[0] : [])) as any[]
     ).map((pos) => {
       return {
+        collateralType: coinType,
         debtor: pos.debtor,
         collAmount: Number(pos.coll_amount) / 10 ** COIN_DECIMALS[coinSymbol],
         debtAmount: Number(pos.debt_amount) / 10 ** COIN_DECIMALS.VUSD,
