@@ -750,6 +750,7 @@ var VirtueClient = class {
     const [positionBytes, nextCursorBytes] = res.results[0].returnValues;
     const positions = bcs.vector(CDP_POSITION_DATA).parse(Uint8Array.from(positionBytes ? positionBytes[0] : [])).map((pos) => {
       return {
+        collateralType: coinType,
         debtor: pos.debtor,
         collAmount: Number(pos.coll_amount) / 10 ** COIN_DECIMALS[coinSymbol],
         debtAmount: Number(pos.debt_amount) / 10 ** COIN_DECIMALS.VUSD

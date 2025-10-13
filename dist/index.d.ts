@@ -87,6 +87,7 @@ type Rewarder = SharedObjectRef & {
 };
 type CdpPositionsResponse = {
     positions: {
+        collateralType: string;
         debtor: string;
         collAmount: number;
         debtAmount: number;
