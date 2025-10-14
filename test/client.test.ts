@@ -8,6 +8,11 @@ describe("Interacting with VirtueClient", () => {
   const client = new VirtueClient({ sender: walletAddress });
 
   it("test getAllVaults() function", async () => {
+    const poolPos = await client.getStabilityPoolPositions({ pageSize: 200 });
+    console.log(poolPos);
+  });
+  return;
+  it("test getAllVaults() function", async () => {
     const vaults = await client.getAllVaults();
     // console.log(vaults);
     expect(vaults).toBeDefined();

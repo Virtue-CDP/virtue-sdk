@@ -791,9 +791,10 @@ var VirtueClient = class {
     const [positionVec, nextCursorVec] = res.results[0].returnValues;
     const positions = bcs.vector(POOL_POSITION_DATA).parse(Uint8Array.from(positionVec ? positionVec[0] : [])).map((pos) => {
       const collAmounts = {};
-      pos.coll_types.map(
-        (t, idx) => collAmounts["0x" + t.fields.name] = Number(pos.coll_amounts[idx])
-      );
+      pos.coll_types.map((t, idx) => {
+        console.log("t", t);
+        return collAmounts["0x" + t.name] = Number(pos.coll_amounts[idx]);
+      });
       return {
         account: pos.account,
         vusdAmount: Number(pos.vusd_balance),
