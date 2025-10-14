@@ -792,7 +792,6 @@ var VirtueClient = class {
     const positions = _bcs.bcs.vector(POOL_POSITION_DATA).parse(Uint8Array.from(positionVec ? positionVec[0] : [])).map((pos) => {
       const collAmounts = {};
       pos.coll_types.map((t, idx) => {
-        console.log("t", t);
         return collAmounts["0x" + t.name] = Number(pos.coll_amounts[idx]);
       });
       return {

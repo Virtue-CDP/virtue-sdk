@@ -508,7 +508,6 @@ export class VirtueClient {
     ).map((pos) => {
       const collAmounts: Record<string, number> = {};
       (pos.coll_types as any[]).map((t, idx) => {
-        console.log("t", t);
         return (collAmounts["0x" + t.name] = Number(pos.coll_amounts[idx]));
       });
       return {
