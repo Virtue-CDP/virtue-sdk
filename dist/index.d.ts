@@ -410,7 +410,7 @@ declare class VirtueClient {
     buildClaimStabilityPoolTransaction(inputs: {
         accountObj?: string;
         keepTransaction?: boolean;
-    }): Promise<Transaction>;
+    }): Transaction;
     /**
      * @description claim the rewards from borrow incentive program
      */

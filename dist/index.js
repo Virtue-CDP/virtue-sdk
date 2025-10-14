@@ -1436,7 +1436,7 @@ var VirtueClient = class {
    * @param withdrawAmount: how much amount to withdraw (collateral)
    * @returns Transaction
    */
-  async buildClaimStabilityPoolTransaction(inputs) {
+  buildClaimStabilityPoolTransaction(inputs) {
     const { keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
