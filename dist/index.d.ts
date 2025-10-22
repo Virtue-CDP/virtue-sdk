@@ -7,8 +7,6 @@ import { Infer } from 'superstruct';
 
 type COIN = "VUSD" | "IOTA" | "stIOTA" | "iBTC";
 type COLLATERAL_COIN = "IOTA" | "stIOTA" | "iBTC";
-type DEPOSIT_POINT_BONUS_COIN = Extract<COIN, "stIOTA">;
-declare function isDepositPointBonusCoin(coin: COIN): coin is DEPOSIT_POINT_BONUS_COIN;
 
 type Float = {
     fields: {
@@ -134,9 +132,8 @@ type ConfigType = {
     CERT_RULE_PACKAGE_ID: string;
     CERT_NATIVE_POOL_OBJ: SharedObjectRef;
     CERT_METADATA_OBJ: SharedObjectRef;
-    POINT_PACKAGE_ADMIN_CAP_OBJECT_ID: string;
-    POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF: SharedObjectRef;
-    POINT_HANDLER_MAP: Record<DEPOSIT_POINT_BONUS_COIN, SharedObjectRef>;
+    POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
+    POINT_MANAGER_OBJ: SharedObjectRef;
     STABILITY_POOL_TABLE_ID: string;
     STABILITY_POOL_REWARDERS: Rewarder[];
     VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo>;
@@ -434,7 +431,7 @@ declare class VirtueClient {
     /**
      * @description instruction for emitting point request
      */
-    emitPointForDepositAction(collateralSymbol: DEPOSIT_POINT_BONUS_COIN, response: TransactionArgument): void;
+    emitPoint(collateralSymbol: COLLATERAL_COIN, response: TransactionArgument): void;
 }
 
 declare function getObjectNames(objectTypes: string[], coinTypes: Record<COIN, string>): string[];
@@ -457,4 +454,4 @@ declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
 
-export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, type DEPOSIT_POINT_BONUS_COIN, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, isDepositPointBonusCoin, parseUnits, parseVaultObject };
+export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject };

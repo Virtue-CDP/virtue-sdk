@@ -22,8 +22,6 @@ import {
   StabilityPoolInfo,
   StabilityPoolBalances,
   Rewards,
-  isDepositPointBonusCoin,
-  DEPOSIT_POINT_BONUS_COIN,
   CdpPositionsResponse,
   PoolPositionsResponse,
 } from "@/types";
@@ -921,6 +919,7 @@ export class VirtueClient {
   }) {
     const { collateralSymbol, response } = inputs;
     const vaultObj = this.vaultObj(collateralSymbol);
+    this.emitPoint(collateralSymbol, response);
     this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::vault::destroy_response`,
       typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
@@ -1106,10 +1105,6 @@ export class VirtueClient {
         updateRequest,
         priceResult: priceResults[collateralSymbol],
       });
-      // emit point
-      if (isDepositPointBonusCoin(collateralSymbol))
-        this.emitPointForDepositAction(collateralSymbol, response);
-
       this.checkResponse({ collateralSymbol, response });
       if (Number(withdrawAmount) > 0) {
         this.transaction.transferObjects([collCoin], recipient ?? this.sender);
@@ -1152,9 +1147,6 @@ export class VirtueClient {
         collateralSymbol,
         updateRequest,
       });
-      // emit point
-      if (isDepositPointBonusCoin(collateralSymbol))
-        this.emitPointForDepositAction(collateralSymbol, response);
 
       this.checkResponse({ collateralSymbol, response });
       this.destroyZeroCoin(collateralSymbol, collCoin);
@@ -1210,9 +1202,6 @@ export class VirtueClient {
       collateralSymbol,
       updateRequest,
     });
-    // emit point
-    if (isDepositPointBonusCoin(collateralSymbol))
-      this.emitPointForDepositAction(collateralSymbol, response);
 
     this.checkResponse({ collateralSymbol, response });
     this.destroyZeroCoin("VUSD", vusdCoin);
@@ -1402,24 +1391,15 @@ export class VirtueClient {
   /**
    * @description instruction for emitting point request
    */
-  emitPointForDepositAction(
-    collateralSymbol: DEPOSIT_POINT_BONUS_COIN,
-    response: TransactionArgument,
-  ) {
+  emitPoint(collateralSymbol: COLLATERAL_COIN, response: TransactionArgument) {
     if (this.config.POINT_PACKAGE_ID) {
       this.transaction.moveCall({
-        target: `${this.config.POINT_PACKAGE_ID}::point::emit_point_for_deposit_action`,
+        target: `${this.config.POINT_PACKAGE_ID}::point_manager::emit_point`,
         typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
         arguments: [
-          this.transaction.sharedObjectRef(
-            this.config.POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF,
-          ),
-          this.transaction.sharedObjectRef(
-            this.config.POINT_HANDLER_MAP[collateralSymbol],
-          ),
-          this.transaction.sharedObjectRef(
-            this.config.VAULT_MAP[collateralSymbol].vault,
-          ),
+          this.transaction.sharedObjectRef(this.config.POINT_MANAGER_OBJ),
+          this.transaction.sharedObjectRef(this.config.POINT_GLOBAL_CONFIG_OBJ),
+          this.vaultObj(collateralSymbol),
           response,
           this.transaction.object.clock(),
         ],

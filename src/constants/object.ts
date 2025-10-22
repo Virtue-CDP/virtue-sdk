@@ -1,7 +1,6 @@
 import {
   COIN,
   COLLATERAL_COIN,
-  DEPOSIT_POINT_BONUS_COIN,
   Rewarder,
   SharedObjectRef,
   VaultObjectInfo,
@@ -40,9 +39,8 @@ export type ConfigType = {
   CERT_NATIVE_POOL_OBJ: SharedObjectRef;
   CERT_METADATA_OBJ: SharedObjectRef;
 
-  POINT_PACKAGE_ADMIN_CAP_OBJECT_ID: string;
-  POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF: SharedObjectRef;
-  POINT_HANDLER_MAP: Record<DEPOSIT_POINT_BONUS_COIN, SharedObjectRef>;
+  POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
+  POINT_MANAGER_OBJ: SharedObjectRef;
 
   STABILITY_POOL_TABLE_ID: string;
   STABILITY_POOL_REWARDERS: Rewarder[];
@@ -87,7 +85,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     INCENTIVE_PACKAGE_ID:
       "0x86aa277cf34776edba2ccf29b2c61a1b49d652a34c5a2321e787ca717412fd10",
     POINT_PACKAGE_ID:
-      "0x745a1c670fd04d9e71b43a3593a855c79af5e6aa6979d1029f35ec9baa344c1e",
+      "0x1cac111e3a56dc47810c865e51c08c4a0d3179e5db589370ee1ae28aa74b8c71",
 
     CLOCK_OBJ: {
       objectId:
@@ -145,21 +143,17 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       initialSharedVersion: 19,
       mutable: false,
     },
-    POINT_PACKAGE_ADMIN_CAP_OBJECT_ID:
-      "0x2bc471bd479eac37891f3ad6641142960478d6f1724a038e2fe56f7fd28e0091",
-    POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF: {
+    POINT_GLOBAL_CONFIG_OBJ: {
       objectId:
         "0x86f95e88bcc50edbd930153079db969e92f050c887d7d4b4642a08cbb04d8787",
       initialSharedVersion: 126182186,
       mutable: false,
     },
-    POINT_HANDLER_MAP: {
-      stIOTA: {
-        objectId:
-          "0xcd096080bca84ea1c60dfe2b8efcad1eceb41acbe69de1c71f867dd2d3b51dd1",
-        initialSharedVersion: 126182187,
-        mutable: false,
-      },
+    POINT_MANAGER_OBJ: {
+      objectId:
+        "0xc90ae64074625de2380317105548d930313766875eabfc3aa1a26e7d387dd45c",
+      initialSharedVersion: 153071646,
+      mutable: false,
     },
     STABILITY_POOL_TABLE_ID:
       "0x6dd808c50bab98757f7523562bdef7d33d506bb447ea9e708072bf13a5e29f02",
@@ -316,18 +310,15 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       initialSharedVersion: 241105314,
       mutable: false,
     },
-    POINT_PACKAGE_ADMIN_CAP_OBJECT_ID: "",
-    POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF: {
+    POINT_GLOBAL_CONFIG_OBJ: {
       objectId: "",
       initialSharedVersion: 0,
       mutable: false,
     },
-    POINT_HANDLER_MAP: {
-      stIOTA: {
-        objectId: "",
-        initialSharedVersion: 0,
-        mutable: false,
-      },
+    POINT_MANAGER_OBJ: {
+      objectId: "",
+      initialSharedVersion: 0,
+      mutable: false,
     },
     STABILITY_POOL_TABLE_ID:
       "0xde5e356ae1dbe072f5fec0c006c29ff99c04647233e2e8bb6a295f3418a5c386",

@@ -37,7 +37,7 @@ var CONFIG = {
     CDP_PACKAGE_ID: "0xb0ca01917f84a07774397395467fc2d56de377fab9d603cb79b82f062d1f6e9a",
     STABILITY_POOL_PACKAGE_ID: "0xe50fa492446245d9dd4bc61641a4ab2e72cd1276703d6ae8e41377a046b0929b",
     INCENTIVE_PACKAGE_ID: "0x86aa277cf34776edba2ccf29b2c61a1b49d652a34c5a2321e787ca717412fd10",
-    POINT_PACKAGE_ID: "0x745a1c670fd04d9e71b43a3593a855c79af5e6aa6979d1029f35ec9baa344c1e",
+    POINT_PACKAGE_ID: "0x1cac111e3a56dc47810c865e51c08c4a0d3179e5db589370ee1ae28aa74b8c71",
     CLOCK_OBJ: {
       objectId: "0x0000000000000000000000000000000000000000000000000000000000000006",
       initialSharedVersion: 1,
@@ -82,18 +82,15 @@ var CONFIG = {
       initialSharedVersion: 19,
       mutable: false
     },
-    POINT_PACKAGE_ADMIN_CAP_OBJECT_ID: "0x2bc471bd479eac37891f3ad6641142960478d6f1724a038e2fe56f7fd28e0091",
-    POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF: {
+    POINT_GLOBAL_CONFIG_OBJ: {
       objectId: "0x86f95e88bcc50edbd930153079db969e92f050c887d7d4b4642a08cbb04d8787",
       initialSharedVersion: 126182186,
       mutable: false
     },
-    POINT_HANDLER_MAP: {
-      stIOTA: {
-        objectId: "0xcd096080bca84ea1c60dfe2b8efcad1eceb41acbe69de1c71f867dd2d3b51dd1",
-        initialSharedVersion: 126182187,
-        mutable: false
-      }
+    POINT_MANAGER_OBJ: {
+      objectId: "0xc90ae64074625de2380317105548d930313766875eabfc3aa1a26e7d387dd45c",
+      initialSharedVersion: 153071646,
+      mutable: false
     },
     STABILITY_POOL_TABLE_ID: "0x6dd808c50bab98757f7523562bdef7d33d506bb447ea9e708072bf13a5e29f02",
     STABILITY_POOL_REWARDERS: [
@@ -214,18 +211,15 @@ var CONFIG = {
       initialSharedVersion: 241105314,
       mutable: false
     },
-    POINT_PACKAGE_ADMIN_CAP_OBJECT_ID: "",
-    POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF: {
+    POINT_GLOBAL_CONFIG_OBJ: {
       objectId: "",
       initialSharedVersion: 0,
       mutable: false
     },
-    POINT_HANDLER_MAP: {
-      stIOTA: {
-        objectId: "",
-        initialSharedVersion: 0,
-        mutable: false
-      }
+    POINT_MANAGER_OBJ: {
+      objectId: "",
+      initialSharedVersion: 0,
+      mutable: false
     },
     STABILITY_POOL_TABLE_ID: "0xde5e356ae1dbe072f5fec0c006c29ff99c04647233e2e8bb6a295f3418a5c386",
     STABILITY_POOL_REWARDERS: [],
@@ -272,11 +266,6 @@ var CONFIG = {
     }
   }
 };
-
-// src/types/coin.ts
-function isDepositPointBonusCoin(coin) {
-  return coin === "stIOTA";
-}
 
 // src/utils/format.ts
 var _utils = require('@iota/iota-sdk/utils');
@@ -1134,6 +1123,7 @@ var VirtueClient = class {
   checkResponse(inputs) {
     const { collateralSymbol, response } = inputs;
     const vaultObj = this.vaultObj(collateralSymbol);
+    this.emitPoint(collateralSymbol, response);
     this.transaction.moveCall({
       target: `${this.config.CDP_PACKAGE_ID}::vault::destroy_response`,
       typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
@@ -1286,8 +1276,6 @@ var VirtueClient = class {
         updateRequest,
         priceResult: priceResults[collateralSymbol]
       });
-      if (isDepositPointBonusCoin(collateralSymbol))
-        this.emitPointForDepositAction(collateralSymbol, response);
       this.checkResponse({ collateralSymbol, response });
       if (Number(withdrawAmount) > 0) {
         this.transaction.transferObjects([collCoin], _nullishCoalesce(recipient, () => ( this.sender)));
@@ -1330,8 +1318,6 @@ var VirtueClient = class {
         collateralSymbol,
         updateRequest
       });
-      if (isDepositPointBonusCoin(collateralSymbol))
-        this.emitPointForDepositAction(collateralSymbol, response);
       this.checkResponse({ collateralSymbol, response });
       this.destroyZeroCoin(collateralSymbol, collCoin);
       this.destroyZeroCoin("VUSD", vusdCoin);
@@ -1379,8 +1365,6 @@ var VirtueClient = class {
       collateralSymbol,
       updateRequest
     });
-    if (isDepositPointBonusCoin(collateralSymbol))
-      this.emitPointForDepositAction(collateralSymbol, response);
     this.checkResponse({ collateralSymbol, response });
     this.destroyZeroCoin("VUSD", vusdCoin);
     this.transaction.transferObjects(
@@ -1542,21 +1526,15 @@ var VirtueClient = class {
   /**
    * @description instruction for emitting point request
    */
-  emitPointForDepositAction(collateralSymbol, response) {
+  emitPoint(collateralSymbol, response) {
     if (this.config.POINT_PACKAGE_ID) {
       this.transaction.moveCall({
-        target: `${this.config.POINT_PACKAGE_ID}::point::emit_point_for_deposit_action`,
+        target: `${this.config.POINT_PACKAGE_ID}::point_manager::emit_point`,
         typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
         arguments: [
-          this.transaction.sharedObjectRef(
-            this.config.POINT_GLOBAL_CONFIG_SHARED_OBJECT_REF
-          ),
-          this.transaction.sharedObjectRef(
-            this.config.POINT_HANDLER_MAP[collateralSymbol]
-          ),
-          this.transaction.sharedObjectRef(
-            this.config.VAULT_MAP[collateralSymbol].vault
-          ),
+          this.transaction.sharedObjectRef(this.config.POINT_MANAGER_OBJ),
+          this.transaction.sharedObjectRef(this.config.POINT_GLOBAL_CONFIG_OBJ),
+          this.vaultObj(collateralSymbol),
           response,
           this.transaction.object.clock()
         ]
@@ -1581,6 +1559,5 @@ var VirtueClient = class {
 
 
 
-
-exports.COIN_DECIMALS = COIN_DECIMALS; exports.CONFIG = CONFIG; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.isDepositPointBonusCoin = isDepositPointBonusCoin; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
+exports.COIN_DECIMALS = COIN_DECIMALS; exports.CONFIG = CONFIG; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
 //# sourceMappingURL=index.js.map
