@@ -85,7 +85,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     INCENTIVE_PACKAGE_ID:
       "0x86aa277cf34776edba2ccf29b2c61a1b49d652a34c5a2321e787ca717412fd10",
     POINT_PACKAGE_ID:
-      "0x1cac111e3a56dc47810c865e51c08c4a0d3179e5db589370ee1ae28aa74b8c71",
+      "0x080d5056d77b7c3ed6a7a99008a3520c5279665e17cadc868dd2982a5c9c811d",
 
     CLOCK_OBJ: {
       objectId:
