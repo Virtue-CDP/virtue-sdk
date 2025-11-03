@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vitest";
-import { VirtueClient } from "../src/index";
+import { COLLATERAL_COIN, VirtueClient } from "../src/index";
+import { coinWithBalance } from "@iota/iota-sdk/transactions";
 
 describe("Interacting with VirtueClient", () => {
   // Instantiate Client
@@ -164,5 +165,36 @@ describe("Interacting with VirtueClient", () => {
             `<${client.config.POINT_PACKAGE_ID}::point::VirtuePointWitness>`,
       ),
     ).toBeTruthy();
+  }, 15000);
+
+  it("test donorRequest() function", async () => {
+    client.resetTransaction();
+    const collateralSymbol: COLLATERAL_COIN = "IOTA";
+    const collateralCoinType = client.config.COIN_TYPES[collateralSymbol];
+    let request = client.donorRequest({
+      collateralSymbol,
+      debtor:
+        "0x99117af9eff00799ec35a0bc3039219617e2e22a2ddccee8704ffffbaf3b7800",
+      depositCoin: coinWithBalance({
+        balance: 0,
+        type: collateralCoinType,
+        useGasCoin: true,
+      }),
+      repaymentCoin: coinWithBalance({
+        balance: 0,
+        type: client.config.COIN_TYPES.VUSD,
+      }),
+    });
+    request = client.checkRequest({ collateralSymbol, request });
+    const [collOut, vusdOut, response] = client.updatePosition({
+      collateralSymbol,
+      updateRequest: request,
+    });
+    client.destroyZeroCoin(collateralSymbol, collOut);
+    client.destroyZeroCoin("VUSD", vusdOut);
+    client.checkResponse({ collateralSymbol, response });
+    const dryrunRes = await client.dryrunTransaction();
+    console.log(dryrunRes.events);
+    client.resetTransaction();
   }, 15000);
 });

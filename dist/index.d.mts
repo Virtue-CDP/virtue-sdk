@@ -281,6 +281,22 @@ declare class VirtueClient {
         accountObj?: string | TransactionArgument;
     }): TransactionArgument;
     /**
+     * @description Get a request to Mange Position
+     * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
+     * @param depositCoin: collateral input coin
+     * @param borrowAmount: the amount to borrow
+     * @param repaymentCoin: repyment input coin (always VUSD)
+     * @param withdrawAmount: the amount to withdraw
+     * @param accountObj (optional): account object id or transaction argument
+     * @returns UpdateRequest
+     */
+    donorRequest(inputs: {
+        collateralSymbol: COLLATERAL_COIN;
+        debtor: string;
+        depositCoin: TransactionArgument;
+        repaymentCoin: TransactionArgument;
+    }): TransactionArgument;
+    /**
      * @description Manage Position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
      * @param updateRequest: manager request, ex: see this.debtorRequest
