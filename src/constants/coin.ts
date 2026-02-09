@@ -5,4 +5,5 @@ export const COIN_DECIMALS: Record<COIN, number> = {
   IOTA: 9,
   stIOTA: 9,
   iBTC: 10,
+  vIOTA: 9,
 };

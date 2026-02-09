@@ -5,8 +5,8 @@ import { Keypair } from '@iota/iota-sdk/cryptography';
 import * as superstruct from 'superstruct';
 import { Infer } from 'superstruct';
 
-type COIN = "VUSD" | "IOTA" | "stIOTA" | "iBTC";
-type COLLATERAL_COIN = "IOTA" | "stIOTA" | "iBTC";
+type COIN = "VUSD" | "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
+type COLLATERAL_COIN = "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
 
 type Float = {
     fields: {
@@ -132,6 +132,9 @@ type ConfigType = {
     CERT_RULE_PACKAGE_ID: string;
     CERT_NATIVE_POOL_OBJ: SharedObjectRef;
     CERT_METADATA_OBJ: SharedObjectRef;
+    VCERT_RULE_PACKAGE_ID: string;
+    VCERT_NATIVE_POOL_OBJ: SharedObjectRef;
+    VCERT_METADATA_OBJ: SharedObjectRef;
     POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
     POINT_MANAGER_OBJ: SharedObjectRef;
     STABILITY_POOL_TABLE_ID: string;

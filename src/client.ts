@@ -750,11 +750,11 @@ export class VirtueClient {
     );
 
     // deal with stIOTA
-    const collector = this.newPriceCollector("stIOTA");
+    const stIotaCollector = this.newPriceCollector("stIOTA");
     this.transaction.moveCall({
       target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
       arguments: [
-        collector,
+        stIotaCollector,
         basicPriceResults.IOTA,
         this.transaction.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
         this.transaction.sharedObjectRef(this.config.CERT_METADATA_OBJ),
@@ -767,11 +767,33 @@ export class VirtueClient {
         this.transaction.sharedObjectRef(
           this.config.VAULT_MAP.stIOTA.priceAggregater,
         ),
-        collector,
+        stIotaCollector,
       ],
     });
 
-    return { ...basicPriceResults, stIOTA: stIotaPrice };
+    // deal with vIOTA
+    const vIotaCollector = this.newPriceCollector("vIOTA");
+    this.transaction.moveCall({
+      target: `${this.config.VCERT_RULE_PACKAGE_ID}::vcert_rule::feed`,
+      arguments: [
+        vIotaCollector,
+        basicPriceResults.IOTA,
+        this.transaction.sharedObjectRef(this.config.VCERT_NATIVE_POOL_OBJ),
+        this.transaction.sharedObjectRef(this.config.VCERT_METADATA_OBJ),
+      ],
+    });
+    const vIotaPrice = this.transaction.moveCall({
+      target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+      typeArguments: [this.config.COIN_TYPES.vIOTA],
+      arguments: [
+        this.transaction.sharedObjectRef(
+          this.config.VAULT_MAP.vIOTA.priceAggregater,
+        ),
+        vIotaCollector,
+      ],
+    });
+
+    return { ...basicPriceResults, stIOTA: stIotaPrice, vIOTA: vIotaPrice };
   }
 
   /**

@@ -12,7 +12,8 @@ var COIN_DECIMALS = {
   VUSD: 6,
   IOTA: 9,
   stIOTA: 9,
-  iBTC: 10
+  iBTC: 10,
+  vIOTA: 9
 };
 
 // src/constants/object.ts
@@ -22,7 +23,8 @@ var CONFIG = {
       VUSD: "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f::vusd::VUSD",
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA: "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
-      iBTC: "0x387c459c5c947aac7404e53ba69541c5d64f3cf96f3bc515e7f8a067fb725b54::ibtc::IBTC"
+      iBTC: "0x387c459c5c947aac7404e53ba69541c5d64f3cf96f3bc515e7f8a067fb725b54::ibtc::IBTC",
+      vIOTA: "0xe4abf8b6183c106282addbfb8483a043e1a60f1fd3dd91fb727fa284306a27fd::cert::CERT"
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID: "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b",
     ORIGINAL_VUSD_PACKAGE_ID: "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f",
@@ -80,6 +82,17 @@ var CONFIG = {
     CERT_METADATA_OBJ: {
       objectId: "0x8c25ec843c12fbfddc7e25d66869f8639e20021758cac1a3db0f6de3c9fda2ed",
       initialSharedVersion: 19,
+      mutable: false
+    },
+    VCERT_RULE_PACKAGE_ID: "0x2c3317331b7a1daa69588fb0ab73c1335dba3cb29aa3d3fdc8e80985654312cc",
+    VCERT_NATIVE_POOL_OBJ: {
+      objectId: "0xb435fa61ee8d5473ab36de02c88756f8c74fcc031b4e3a2fe2a6647bb06b2872",
+      initialSharedVersion: 427133775,
+      mutable: false
+    },
+    VCERT_METADATA_OBJ: {
+      objectId: "0xb45b32d8d58c6499795036faa92b0561c6df089cdd4fc6ae8a0543981a698bf1",
+      initialSharedVersion: 427133775,
       mutable: false
     },
     POINT_GLOBAL_CONFIG_OBJ: {
@@ -147,6 +160,18 @@ var CONFIG = {
           mutable: true
         },
         pythPriceId: "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43"
+      },
+      vIOTA: {
+        priceAggregater: {
+          objectId: "0xe5fbc659022066c53f8143e42c604b561719990a1eca76e06bb284f8791d8cc9",
+          initialSharedVersion: 432886623,
+          mutable: false
+        },
+        vault: {
+          objectId: "0x53b6405d2672be1e73f8ddea1766dbda57f1fed677be58fbfedc9fdddaafdd26",
+          initialSharedVersion: 437023773,
+          mutable: true
+        }
       }
     }
   },
@@ -155,7 +180,8 @@ var CONFIG = {
       VUSD: "0x3fbd238eea1f4ce7d797148954518fce853f24a8be01b47388bfa2262602fefa::vusd::VUSD",
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA: "0x14f9e69c0076955d5a056260c9667edab184650dba9919f168a37030dd956dc6::cert::CERT",
-      iBTC: ""
+      iBTC: "",
+      vIOTA: ""
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID: "0x5e1fb08bd2360286cd13dd174f6d17aa8871b08906aa8001079199ad62ad81b1",
     ORIGINAL_VUSD_PACKAGE_ID: "0x3fbd238eea1f4ce7d797148954518fce853f24a8be01b47388bfa2262602fefa",
@@ -221,6 +247,17 @@ var CONFIG = {
       initialSharedVersion: 0,
       mutable: false
     },
+    VCERT_RULE_PACKAGE_ID: "",
+    VCERT_NATIVE_POOL_OBJ: {
+      objectId: "",
+      initialSharedVersion: 0,
+      mutable: false
+    },
+    VCERT_METADATA_OBJ: {
+      objectId: "",
+      initialSharedVersion: 0,
+      mutable: false
+    },
     STABILITY_POOL_TABLE_ID: "0xde5e356ae1dbe072f5fec0c006c29ff99c04647233e2e8bb6a295f3418a5c386",
     STABILITY_POOL_REWARDERS: [],
     VAULT_MAP: {
@@ -262,6 +299,19 @@ var CONFIG = {
           mutable: true
         },
         pythPriceId: "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43"
+      },
+      vIOTA: {
+        priceAggregater: {
+          objectId: "",
+          initialSharedVersion: 0,
+          mutable: false
+        },
+        vault: {
+          objectId: "0",
+          initialSharedVersion: 0,
+          mutable: false
+        },
+        rewarders: []
       }
     }
   }
@@ -956,12 +1006,12 @@ var VirtueClient = class {
     const basicPriceResults = basicSymbol.reduce(
       (result, symbol, idx) => {
         const coinType = this.config.COIN_TYPES[symbol];
-        const collector2 = this.newPriceCollector(symbol);
+        const collector = this.newPriceCollector(symbol);
         this.transaction.moveCall({
           target: `${this.config.PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
           typeArguments: [coinType],
           arguments: [
-            collector2,
+            collector,
             pythRuleConfig,
             this.transaction.object.clock(),
             pythStateObj,
@@ -975,18 +1025,18 @@ var VirtueClient = class {
             this.transaction.sharedObjectRef(
               this.config.VAULT_MAP[symbol].priceAggregater
             ),
-            collector2
+            collector
           ]
         });
         return { ...result, [symbol]: priceResult };
       },
       {}
     );
-    const collector = this.newPriceCollector("stIOTA");
+    const stIotaCollector = this.newPriceCollector("stIOTA");
     this.transaction.moveCall({
       target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
       arguments: [
-        collector,
+        stIotaCollector,
         basicPriceResults.IOTA,
         this.transaction.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
         this.transaction.sharedObjectRef(this.config.CERT_METADATA_OBJ)
@@ -999,10 +1049,30 @@ var VirtueClient = class {
         this.transaction.sharedObjectRef(
           this.config.VAULT_MAP.stIOTA.priceAggregater
         ),
-        collector
+        stIotaCollector
       ]
     });
-    return { ...basicPriceResults, stIOTA: stIotaPrice };
+    const vIotaCollector = this.newPriceCollector("vIOTA");
+    this.transaction.moveCall({
+      target: `${this.config.VCERT_RULE_PACKAGE_ID}::vcert_rule::feed`,
+      arguments: [
+        vIotaCollector,
+        basicPriceResults.IOTA,
+        this.transaction.sharedObjectRef(this.config.VCERT_NATIVE_POOL_OBJ),
+        this.transaction.sharedObjectRef(this.config.VCERT_METADATA_OBJ)
+      ]
+    });
+    const vIotaPrice = this.transaction.moveCall({
+      target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+      typeArguments: [this.config.COIN_TYPES.vIOTA],
+      arguments: [
+        this.transaction.sharedObjectRef(
+          this.config.VAULT_MAP.vIOTA.priceAggregater
+        ),
+        vIotaCollector
+      ]
+    });
+    return { ...basicPriceResults, stIOTA: stIotaPrice, vIOTA: vIotaPrice };
   }
   /**
    * @description Get a request to Mange Position

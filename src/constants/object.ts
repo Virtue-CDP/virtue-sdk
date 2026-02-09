@@ -39,6 +39,10 @@ export type ConfigType = {
   CERT_NATIVE_POOL_OBJ: SharedObjectRef;
   CERT_METADATA_OBJ: SharedObjectRef;
 
+  VCERT_RULE_PACKAGE_ID: string;
+  VCERT_NATIVE_POOL_OBJ: SharedObjectRef;
+  VCERT_METADATA_OBJ: SharedObjectRef;
+
   POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
   POINT_MANAGER_OBJ: SharedObjectRef;
 
@@ -56,6 +60,8 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       stIOTA:
         "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
       iBTC: "0x387c459c5c947aac7404e53ba69541c5d64f3cf96f3bc515e7f8a067fb725b54::ibtc::IBTC",
+      vIOTA:
+        "0xe4abf8b6183c106282addbfb8483a043e1a60f1fd3dd91fb727fa284306a27fd::cert::CERT",
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID:
       "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b",
@@ -129,6 +135,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       initialSharedVersion: 22329882,
       mutable: false,
     },
+
     CERT_RULE_PACKAGE_ID:
       "0x01edb9afe0663b8762d2e0a18923df8bee98d28f3a60ac56ff67a27bbf53a7ac",
     CERT_NATIVE_POOL_OBJ: {
@@ -143,6 +150,22 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       initialSharedVersion: 19,
       mutable: false,
     },
+
+    VCERT_RULE_PACKAGE_ID:
+      "0x2c3317331b7a1daa69588fb0ab73c1335dba3cb29aa3d3fdc8e80985654312cc",
+    VCERT_NATIVE_POOL_OBJ: {
+      objectId:
+        "0xb435fa61ee8d5473ab36de02c88756f8c74fcc031b4e3a2fe2a6647bb06b2872",
+      initialSharedVersion: 427133775,
+      mutable: false,
+    },
+    VCERT_METADATA_OBJ: {
+      objectId:
+        "0xb45b32d8d58c6499795036faa92b0561c6df089cdd4fc6ae8a0543981a698bf1",
+      initialSharedVersion: 427133775,
+      mutable: false,
+    },
+
     POINT_GLOBAL_CONFIG_OBJ: {
       objectId:
         "0x86f95e88bcc50edbd930153079db969e92f050c887d7d4b4642a08cbb04d8787",
@@ -223,6 +246,20 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
         pythPriceId:
           "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
       },
+      vIOTA: {
+        priceAggregater: {
+          objectId:
+            "0xe5fbc659022066c53f8143e42c604b561719990a1eca76e06bb284f8791d8cc9",
+          initialSharedVersion: 432886623,
+          mutable: false,
+        },
+        vault: {
+          objectId:
+            "0x53b6405d2672be1e73f8ddea1766dbda57f1fed677be58fbfedc9fdddaafdd26",
+          initialSharedVersion: 437023773,
+          mutable: true,
+        },
+      },
     },
   },
   testnet: {
@@ -232,6 +269,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       stIOTA:
         "0x14f9e69c0076955d5a056260c9667edab184650dba9919f168a37030dd956dc6::cert::CERT",
       iBTC: "",
+      vIOTA: "",
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID:
       "0x5e1fb08bd2360286cd13dd174f6d17aa8871b08906aa8001079199ad62ad81b1",
@@ -320,6 +358,17 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       initialSharedVersion: 0,
       mutable: false,
     },
+    VCERT_RULE_PACKAGE_ID: "",
+    VCERT_NATIVE_POOL_OBJ: {
+      objectId: "",
+      initialSharedVersion: 0,
+      mutable: false,
+    },
+    VCERT_METADATA_OBJ: {
+      objectId: "",
+      initialSharedVersion: 0,
+      mutable: false,
+    },
     STABILITY_POOL_TABLE_ID:
       "0xde5e356ae1dbe072f5fec0c006c29ff99c04647233e2e8bb6a295f3418a5c386",
     STABILITY_POOL_REWARDERS: [],
@@ -370,6 +419,19 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
         },
         pythPriceId:
           "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      },
+      vIOTA: {
+        priceAggregater: {
+          objectId: "",
+          initialSharedVersion: 0,
+          mutable: false,
+        },
+        vault: {
+          objectId: "0",
+          initialSharedVersion: 0,
+          mutable: false,
+        },
+        rewarders: [],
       },
     },
   },
