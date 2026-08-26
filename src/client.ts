@@ -1340,6 +1340,38 @@ export class VirtueClient {
     recipient?: string;
     keepTransaction?: boolean;
   }): Promise<Transaction> {
+    const { keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
+    // Coin splits and the oracle commands land on the shared transaction before
+    // this method can know whether the position is buildable at all, so a
+    // failure partway through would leave the caller's transaction holding
+    // commands for a position that was never built. Snapshot first and roll
+    // back, so the method either produces a whole transaction or none of it.
+    const snapshot = this.transaction.serialize();
+    try {
+      return await this.buildManagePosition(inputs);
+    } catch (error) {
+      this.transaction = Transaction.from(snapshot);
+      throw error;
+    }
+  }
+
+  /**
+   * @description The body of `buildManagePositionTransaction`, split out so the
+   * caller above can roll the shared transaction back if any of it throws.
+   */
+  private async buildManagePosition(inputs: {
+    collateralSymbol: COLLATERAL_COIN;
+    depositAmount: string;
+    borrowAmount: string;
+    repaymentAmount: string;
+    withdrawAmount: string;
+    accountObjId?: string;
+    recipient?: string;
+    keepTransaction?: boolean;
+  }): Promise<Transaction> {
     const {
       collateralSymbol,
       depositAmount,
@@ -1350,9 +1382,6 @@ export class VirtueClient {
       recipient,
       keepTransaction,
     } = inputs;
-    if (!keepTransaction) this.resetTransaction();
-    if (!this.sender) throw new Error("Sender is not set");
-    this.transaction.setSender(this.sender);
     const [depositCoin] = await this.splitInputCoins(
       collateralSymbol,
       depositAmount,

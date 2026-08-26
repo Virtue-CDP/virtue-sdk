@@ -1510,6 +1510,23 @@ var VirtueClient = class {
    * @returns Transaction
    */
   async buildManagePositionTransaction(inputs) {
+    const { keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
+    if (!this.sender) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
+    const snapshot = this.transaction.serialize();
+    try {
+      return await this.buildManagePosition(inputs);
+    } catch (error) {
+      this.transaction = _transactions.Transaction.from(snapshot);
+      throw error;
+    }
+  }
+  /**
+   * @description The body of `buildManagePositionTransaction`, split out so the
+   * caller above can roll the shared transaction back if any of it throws.
+   */
+  async buildManagePosition(inputs) {
     const {
       collateralSymbol,
       depositAmount,
@@ -1520,9 +1537,6 @@ var VirtueClient = class {
       recipient,
       keepTransaction
     } = inputs;
-    if (!keepTransaction) this.resetTransaction();
-    if (!this.sender) throw new Error("Sender is not set");
-    this.transaction.setSender(this.sender);
     const [depositCoin] = await this.splitInputCoins(
       collateralSymbol,
       depositAmount

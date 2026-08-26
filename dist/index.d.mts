@@ -450,6 +450,11 @@ declare class VirtueClient {
         keepTransaction?: boolean;
     }): Promise<Transaction>;
     /**
+     * @description The body of `buildManagePositionTransaction`, split out so the
+     * caller above can roll the shared transaction back if any of it throws.
+     */
+    private buildManagePosition;
+    /**
      * @description build and return Transaction of close position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
      * @param accountObjId: the Account object to hold position (undefined if just use EOA)

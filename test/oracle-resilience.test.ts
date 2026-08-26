@@ -143,6 +143,46 @@ describe("oracle source resilience", () => {
     60_000,
   );
 
+  /**
+   * The oracle commands are appended to the shared transaction before this can
+   * be known, so the failure has to roll them back rather than leave the
+   * caller's transaction holding commands for a position that was never built.
+   */
+  it(
+    "leaves the caller's transaction untouched when nothing can price the collateral",
+    async () => {
+      const client = new VirtueClient({
+        sender: `0x${"1".repeat(64)}`,
+      });
+      client.resetTransaction();
+      // the caller is already composing something of their own
+      const tx = client.getTransaction();
+      tx.moveCall({
+        target: "0x2::clock::timestamp_ms",
+        arguments: [tx.object.clock()],
+      });
+      const before = client.getTransaction().getData().commands.length;
+
+      breakCrossbar("reject");
+      breakHermes(client);
+
+      await expect(
+        client.buildManagePositionTransaction({
+          // iBTC is priced by Pyth alone, so with Pyth down nothing can price it
+          collateralSymbol: "iBTC",
+          depositAmount: "0",
+          borrowAmount: "10000",
+          repaymentAmount: "0",
+          withdrawAmount: "0",
+          keepTransaction: true,
+        }),
+      ).rejects.toThrow(/No oracle rule could price/);
+
+      expect(client.getTransaction().getData().commands.length).toBe(before);
+    },
+    60_000,
+  );
+
   it(
     "does not throw from the SDK when every update path is down",
     async () => {
