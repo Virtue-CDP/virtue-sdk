@@ -35,7 +35,9 @@ The client holds **one mutable `this.transaction`** (`Transaction`) that builder
 - `resetTransaction()` swaps in a fresh `Transaction`. Most `buildXxxTransaction` methods call it at the start unless `keepTransaction: true` is passed — this flag is how multiple build steps are composed into one tx (e.g. `buildClaimTotalRewards` chains borrow + pool reward claims).
 - `sender` defaults to `DUMMY_ADDRESS` (`0x0`) when no address is given. Read methods that need a real address throw if it's still `0x0`.
 - **Reads** use `devInspectTransactionBlock` / `dryRunTransactionBlock` and parse `returnValues`/`events` with `bcs` structs (see `CDP_POSITION_DATA`, `POOL_POSITION_DATA` at the top of `client.ts`). `getCollateralPrices` works by dry-running `aggregatePrices` and reading emitted price events.
-- **Prices** come from Pyth (`@pythnetwork/pyth-iota-js`). `aggregatePrices()` feeds Pyth update data for the "basic" symbols (`IOTA`, `iBTC`), then derives `stIOTA` and `vIOTA` prices from the `IOTA` price via cert/vcert rules. Adding a new collateral type means extending this method, not just `VAULT_MAP`.
+- **Prices** come from one or more oracle *rules* feeding a shared collector, which `aggregater::aggregate` reduces to a single `PriceResult`. `aggregatePrices()` runs the rules for the "basic" symbols (`IOTA`, `iBTC`), then derives `stIOTA` and `vIOTA` prices from the `IOTA` price via cert/vcert rules. Adding a new collateral type means extending this method, not just `VAULT_MAP`.
+  - **Pyth** (`@pythnetwork/pyth-iota-js`) is push-based: feed the update data, then call `pyth_rule::feed`.
+  - **Switchboard** is on-demand — `Aggregator.current_result` only moves when someone submits a signed response — so `crankSwitchboard()` fetches signed responses from crossbar and submits them *in the same PTB* before `switchboard_rule::feed` reads it. Most oracles on the IOTA queues fail `validate` (their signature no longer recovers to their on-chain `secp256k1_key`), and a PTB is all-or-nothing, so each response is devInspected alone first and only survivors are added. If none survive, the rule abstains rather than quoting a stale price.
 
 ### The CDP position flow (most important to understand)
 
@@ -50,6 +52,9 @@ Deposit/borrow/repay/withdraw are all the same call with different non-zero amou
 
 The stability pool has a parallel flow (`depositStabilityPool` / `withdrawStabilityPool` / `claimStabilityPool` → `checkResponseForStabilityPool`), also gated on the optional incentive program.
 
-### Incentive / point programs are optional
+### Optional, config-gated features
 
-`INCENTIVE_PACKAGE_ID` and `POINT_PACKAGE_ID` are optional in `ConfigType`. testnet config omits them, so `checkRequest`, `checkResponseForStabilityPool`, and `emitPoint` are all guarded by `if (this.config.XXX)` and become no-ops there. Preserve these guards when editing.
+Several parts of `ConfigType` are optional and testnet omits them, so the code paths that use them are guarded by `if (this.config.XXX)` and become no-ops there. Preserve these guards when editing.
+
+- `INCENTIVE_PACKAGE_ID` / `POINT_PACKAGE_ID` gate `checkRequest`, `checkResponseForStabilityPool`, and `emitPoint`.
+- `SWITCHBOARD_PACKAGE_ID`, `SWITCHBOARD_RULE_PACKAGE_ID`, `SWITCHBOARD_RULE_CONFIG_OBJ`, and `SWITCHBOARD_AGGREGATORS` gate the Switchboard crank and its `feed` call in `aggregatePrices` — there is no Switchboard deployment on testnet. `SWITCHBOARD_AGGREGATORS` is per-symbol, so a collateral with no aggregator registered simply gets Pyth alone.
