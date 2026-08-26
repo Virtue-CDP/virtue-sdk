@@ -37,6 +37,41 @@ import { Keypair } from "@iota/iota-sdk/cryptography";
 /** Upper bound on the crossbar round-trip, so a hung endpoint can't stall a price read. */
 const SWITCHBOARD_CRANK_TIMEOUT_MS = 5_000;
 
+/** The collaterals priced directly by an oracle; the rest are derived from these. */
+const BASIC_PRICE_SYMBOLS: COLLATERAL_COIN[] = ["IOTA", "iBTC"];
+
+/** One signed Switchboard response, as crossbar hands it over. */
+type SwitchboardResponse = {
+  successValue: string;
+  isNegative: boolean;
+  timestamp: number;
+  signature: string;
+  oracleId: string;
+};
+
+/** Responses already proven to validate on chain, with the queue they belong to. */
+type PreparedSwitchboard = {
+  aggregatorId: string;
+  queue: string;
+  results: SwitchboardResponse[];
+};
+
+/** Update data already proven to verify on chain, kept so it is never refetched. */
+type PreparedPythUpdate = {
+  priceIds: string[];
+  updateData: Buffer[];
+};
+
+/**
+ * Everything the oracle rules need from the network, resolved before a single
+ * command is written. Applying this cannot fail, which is what lets a position
+ * build be abandoned without having touched the caller's transaction.
+ */
+type PreparedOracleUpdates = {
+  pyth: PreparedPythUpdate | null;
+  switchboard: Partial<Record<COLLATERAL_COIN, PreparedSwitchboard>>;
+};
+
 const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
   const coin = Object.keys(coinTypes).find(
     (key) => coinTypes[key as COIN] === coinType,
@@ -710,74 +745,103 @@ export class VirtueClient {
   }
 
   /**
-   * @description Whether any oracle rule can currently price this collateral —
-   * i.e. whether `aggregatePrices` will return a result for it.
+   * @description Resolve everything the oracle rules need from the network,
+   * without writing anything to the transaction.
    *
-   * This exists to be asked *before* anything is written to the transaction.
-   * The answer is only knowable by probing Pyth, and `aggregatePrices` learns it
-   * as a side effect of building; acting on it afterwards would mean unwinding
-   * commands already appended, and `Transaction` cannot be rolled back in place.
-   * Rebuilding a replacement is not a substitute — it changes object identity and
-   * silently drops the instance's build/serialization plugins and intent
-   * resolvers, which a caller composing with `keepTransaction` may depend on.
+   * Building a position is not reversible. Commands can only be appended to a
+   * `Transaction`, never removed — `getData()` returns a snapshot and the
+   * builder behind it is private — and swapping in a rebuilt object is no
+   * substitute, since that changes the identity a caller is composing against
+   * and drops that instance's plugins and intent resolvers. So everything that
+   * can fail happens here, before the first command is written, and applying the
+   * result afterwards is pure transaction building.
    *
-   * Cheap in the common case: a collateral with a Switchboard aggregator is
-   * priceable by configuration alone and costs no network call. Only a
-   * Pyth-only collateral pays for the probe.
+   * The prepared data is then carried into the aggregation rather than fetched
+   * again. Probing and refetching would leave a window where the preflight
+   * passes and the real fetch fails, throwing only after the transaction had
+   * been written to — and it would pay for the same work twice.
    */
-  private async canPriceCollateral(
+  private async prepareOracleUpdates(
+    basicSymbols: COLLATERAL_COIN[] = BASIC_PRICE_SYMBOLS,
+  ): Promise<PreparedOracleUpdates> {
+    const pythPriceIds = basicSymbols.map(
+      (symbol) => this.config.VAULT_MAP[symbol].pythPriceId ?? "",
+    );
+    const switchboardAggregators = this.config.SWITCHBOARD_AGGREGATORS ?? {};
+
+    const pyth = await this.preparePythUpdate(pythPriceIds);
+
+    const switchboard: Partial<Record<COLLATERAL_COIN, PreparedSwitchboard>> =
+      {};
+    for (const symbol of basicSymbols) {
+      const aggregatorId = switchboardAggregators[symbol];
+      if (!aggregatorId) continue;
+      const prepared = await this.prepareSwitchboard(aggregatorId);
+      if (prepared) switchboard[symbol] = prepared;
+    }
+
+    return { pyth, switchboard };
+  }
+
+  /**
+   * @description Whether the Switchboard rule is wired up for a symbol at all.
+   *
+   * Config alone decides this: the rule abstains on a stale or reconfigured
+   * aggregator instead of aborting, so it is safe to add even when the crank
+   * contributed nothing, and it still counts as a source that can price the
+   * symbol.
+   */
+  private switchboardRuleFeeds(symbol: COLLATERAL_COIN): boolean {
+    return (
+      !!this.config.SWITCHBOARD_AGGREGATORS?.[symbol] &&
+      !!this.config.SWITCHBOARD_RULE_PACKAGE_ID &&
+      !!this.config.SWITCHBOARD_RULE_CONFIG_OBJ
+    );
+  }
+
+  /**
+   * @description Whether any rule can price this collateral given what was
+   * prepared — i.e. whether `aggregatePrices` will return a result for it.
+   *
+   * Pure, and answered from the prepared data, so it can be asked before the
+   * transaction has been touched and cannot disagree with what the build then
+   * does.
+   */
+  private canPriceCollateral(
     collateralSymbol: COLLATERAL_COIN,
-  ): Promise<boolean> {
+    prepared: PreparedOracleUpdates,
+  ): boolean {
     // stIOTA and vIOTA are derived from the IOTA price, so they live or die with it.
     const symbol: COLLATERAL_COIN =
       collateralSymbol === "stIOTA" || collateralSymbol === "vIOTA"
         ? "IOTA"
         : collateralSymbol;
-
-    const switchboardFeeds =
-      !!this.config.SWITCHBOARD_AGGREGATORS?.[symbol] &&
-      !!this.config.SWITCHBOARD_RULE_PACKAGE_ID &&
-      !!this.config.SWITCHBOARD_RULE_CONFIG_OBJ;
-    if (switchboardFeeds) return true;
-
-    const pythPriceId = this.config.VAULT_MAP[symbol].pythPriceId;
-    if (!pythPriceId) return false;
-    return (
-      (await this.updatePythPriceFeeds([pythPriceId], true))[0] !== undefined
-    );
+    if (this.switchboardRuleFeeds(symbol)) return true;
+    return !!prepared.pyth && !!this.config.VAULT_MAP[symbol].pythPriceId;
   }
 
   /**
-   * @description Add Pyth's price-feed update to the current transaction and
-   * return the `PriceInfoObject` ids that `pyth_rule::feed` should read.
+   * @description Fetch Pyth update data and prove it verifies on chain, without
+   * touching the current transaction.
    *
-   * Like the Switchboard crank this never throws, and it goes one step further:
-   * it also refuses to leave an update in the transaction that would abort on
-   * chain. A Pyth update carries a Wormhole VAA, and `vaa::parse_and_verify`
-   * aborts outright once Hermes has moved to a guardian set newer than the one
-   * registered on IOTA — which is the state mainnet is in. That abort is not an
-   * SDK error; it takes down the entire PTB, borrow or liquidation included. So
-   * the update is devInspected on its own first and only applied if it passes.
+   * A Pyth update carries a Wormhole VAA, and `vaa::parse_and_verify` aborts
+   * outright once Hermes has moved to a guardian set newer than the one
+   * registered on IOTA. That abort is not an SDK error — it takes down the whole
+   * PTB, borrow or liquidation included — so the update is devInspected on a
+   * throwaway transaction first and only data that passes is returned.
    *
-   * When it does not pass — or Hermes is unreachable — every entry comes back
-   * undefined and the caller drops `pyth_rule::feed` for that symbol. The rule
-   * cannot be pointed at the un-updated `PriceInfoObject` as a consolation:
-   * `pyth_rule::feed` does not abstain on a stale price, it aborts through
-   * `pyth::check_price_is_fresh`, which would take the PTB down exactly the way
-   * a failed update does. Not feeding is the only safe fallback.
+   * Never throws; an unreachable Hermes or a failing probe both come back
+   * `null`, and the caller drops the Pyth rule for those symbols.
    */
-  private async updatePythPriceFeeds(
+  private async preparePythUpdate(
     pythPriceIds: string[],
-    probeOnly = false,
-  ): Promise<(string | undefined)[]> {
-    const noneFed = () => pythPriceIds.map(() => undefined);
-
+  ): Promise<PreparedPythUpdate | null> {
     try {
       const updateData =
         await this.pythConnection.getPriceFeedsUpdateData(pythPriceIds);
 
       const probe = new Transaction();
-      const probeIds = await this.pythClient.updatePriceFeeds(
+      await this.pythClient.updatePriceFeeds(
         probe as any,
         updateData,
         pythPriceIds,
@@ -786,16 +850,39 @@ export class VirtueClient {
         sender: DUMMY_ADDRESS,
         transactionBlock: probe,
       });
-      if (inspect.effects.status.status !== "success") return noneFed();
+      if (inspect.effects.status.status !== "success") return null;
 
-      // `canPriceCollateral` asks this question before the caller's transaction
-      // has been touched, so answering it must not write to that transaction.
-      if (probeOnly) return probeIds;
+      return { priceIds: pythPriceIds, updateData };
+    } catch {
+      return null;
+    }
+  }
 
+  /**
+   * @description Add the prepared Pyth update to the current transaction and
+   * return the `PriceInfoObject` ids `pyth_rule::feed` should read.
+   *
+   * The probe in `preparePythUpdate` already drove the same call once, which
+   * populated the Pyth client's package, base-fee and price-object caches, so
+   * this is transaction building rather than another round of I/O.
+   *
+   * An undefined entry means Pyth contributes nothing for that symbol, and the
+   * caller drops `pyth_rule::feed` for it. The rule cannot be pointed at the
+   * un-updated `PriceInfoObject` as a consolation: it does not abstain on a
+   * stale price, it aborts through `pyth::check_price_is_fresh`, taking the PTB
+   * down exactly the way a failed update does.
+   */
+  private async applyPythUpdate(
+    prepared: PreparedPythUpdate | null,
+    pythPriceIds: string[],
+  ): Promise<(string | undefined)[]> {
+    const noneFed = () => pythPriceIds.map(() => undefined);
+    if (!prepared) return noneFed();
+    try {
       return await this.pythClient.updatePriceFeeds(
         this.transaction as any,
-        updateData,
-        pythPriceIds,
+        prepared.updateData,
+        prepared.priceIds,
       );
     } catch {
       return noneFed();
@@ -803,8 +890,8 @@ export class VirtueClient {
   }
 
   /**
-   * @description Fetch signed Switchboard responses and add the ones that will
-   * actually validate on chain to the current transaction.
+   * @description Fetch signed Switchboard responses and keep the ones that will
+   * actually validate on chain, without touching the current transaction.
    *
    * Switchboard is on-demand, not push: `Aggregator.current_result` only changes
    * when someone submits a signed oracle response. Left alone the IOTA mainnet
@@ -819,92 +906,51 @@ export class VirtueClient {
    *   time. `numSignatures` asks for the whole set instead.
    * - A PTB is all-or-nothing, so one broken oracle would take the entire price
    *   read — and whatever borrow or liquidation is bundled with it — down too.
-   *   Each response is therefore devInspected on its own first and only the
-   *   survivors are added.
+   *   Each response is therefore devInspected on its own and only the survivors
+   *   are kept.
    *
-   * Returns the number of submissions added, and **never throws**: a crossbar
-   * outage, a slow endpoint, a malformed response, or an RPC failure all resolve
-   * to `0`. Switchboard is one rule among several, so raising here would take
-   * down price reads — and every position build that depends on them — that the
-   * other rules could have served on their own. Contributing nothing is the
-   * correct failure mode: the decision then belongs on chain, where `aggregate`
-   * aborts by itself if no rule supplied a usable price.
-   *
-   * Zero also covers the case where every oracle simply failed validation, in
-   * which case `switchboard_rule::feed` falls back to whatever result is already
-   * on chain — which its freshness gate will reject if it is stale, making the
-   * rule abstain rather than quoting a stale price.
+   * Never throws: a crossbar outage, a slow endpoint, a malformed response or an
+   * RPC failure all come back `null`. Switchboard is one rule among several, so
+   * raising here would take down price reads that the others could have served.
    */
-  private async crankSwitchboard(
+  private async prepareSwitchboard(
     aggregatorId: string,
     numSignatures = 8,
-  ): Promise<number> {
+  ): Promise<PreparedSwitchboard | null> {
     const pkg = this.config.SWITCHBOARD_PACKAGE_ID;
-    if (!pkg) return 0;
+    if (!pkg) return null;
 
     try {
       const res = await fetch(
         `https://crossbar.switchboard.xyz/updates/iota/mainnet/${aggregatorId}?numSignatures=${numSignatures}`,
         { signal: AbortSignal.timeout(SWITCHBOARD_CRANK_TIMEOUT_MS) },
       );
-      if (!res.ok) return 0;
+      if (!res.ok) return null;
       const body = (await res.json()) as {
-        responses?: {
-          results?: {
-            successValue: string;
-            isNegative: boolean;
-            timestamp: number;
-            signature: string;
-            oracleId: string;
-          }[];
-        }[];
+        responses?: { results?: SwitchboardResponse[] }[];
       };
       const results = (body.responses ?? [])
         .flatMap((r) => r.results ?? [])
         // `"00"` is crossbar's placeholder for an oracle that did not sign.
         .filter((r) => r.signature && r.signature !== "00" && r.successValue);
-      if (results.length === 0) return 0;
+      if (results.length === 0) return null;
 
       const aggObj = await this.iotaClient.getObject({
         id: aggregatorId,
         options: { showContent: true },
       });
       const queue = (aggObj.data?.content as any)?.fields?.queue as string;
-      if (!queue) return 0;
+      if (!queue) return null;
 
-      const submit = (tx: Transaction, r: (typeof results)[number]) => {
-        const signature = Uint8Array.from(
-          Buffer.from(r.signature.replace(/^0x/, ""), "hex"),
-        );
-        if (signature.length !== 65) return false;
-        // The queue fee is 0, but `run` still asserts the coin type it accepts.
-        const [fee] = tx.splitCoins(tx.gas, [0]);
-        tx.moveCall({
-          target: `${pkg}::aggregator_submit_result_action::run`,
-          typeArguments: ["0x2::iota::IOTA"],
-          arguments: [
-            tx.object(aggregatorId),
-            tx.object(queue),
-            tx.pure.u128(BigInt(r.successValue.replace(/^-/, ""))),
-            tx.pure.bool(r.isNegative || r.successValue.startsWith("-")),
-            tx.pure.u64(BigInt(r.timestamp)),
-            tx.object(r.oracleId),
-            tx.pure.vector("u8", signature),
-            tx.object.clock(),
-            fee!,
-          ],
-        });
-        return true;
-      };
-
-      const sender = DUMMY_ADDRESS;
       const verdicts = await Promise.all(
         results.map(async (r) => {
           try {
             const probe = new Transaction();
-            if (!submit(probe, r)) return undefined;
+            if (!this.addSwitchboardSubmission(probe, aggregatorId, queue, r)) {
+              return undefined;
+            }
             const inspect = await this.iotaClient.devInspectTransactionBlock({
-              sender,
+              sender: DUMMY_ADDRESS,
               transactionBlock: probe,
             });
             return inspect.effects.status.status === "success" ? r : undefined;
@@ -913,15 +959,76 @@ export class VirtueClient {
           }
         }),
       );
+      const validated = verdicts.filter(
+        (r): r is SwitchboardResponse => r !== undefined,
+      );
+      if (validated.length === 0) return null;
 
-      let added = 0;
-      for (const r of verdicts) {
-        if (r && submit(this.transaction, r)) added++;
-      }
-      return added;
+      return { aggregatorId, queue, results: validated };
     } catch {
-      return 0;
+      return null;
     }
+  }
+
+  /**
+   * @description Append one `aggregator_submit_result_action::run` call. Pure —
+   * no I/O — so replaying a response that already passed its probe cannot fail.
+   * Returns false for a signature that is not the 65 bytes the action expects.
+   */
+  private addSwitchboardSubmission(
+    tx: Transaction,
+    aggregatorId: string,
+    queue: string,
+    r: SwitchboardResponse,
+  ): boolean {
+    const pkg = this.config.SWITCHBOARD_PACKAGE_ID;
+    if (!pkg) return false;
+    const signature = Uint8Array.from(
+      Buffer.from(r.signature.replace(/^0x/, ""), "hex"),
+    );
+    if (signature.length !== 65) return false;
+    // The queue fee is 0, but `run` still asserts the coin type it accepts.
+    const [fee] = tx.splitCoins(tx.gas, [0]);
+    tx.moveCall({
+      target: `${pkg}::aggregator_submit_result_action::run`,
+      typeArguments: ["0x2::iota::IOTA"],
+      arguments: [
+        tx.object(aggregatorId),
+        tx.object(queue),
+        tx.pure.u128(BigInt(r.successValue.replace(/^-/, ""))),
+        tx.pure.bool(r.isNegative || r.successValue.startsWith("-")),
+        tx.pure.u64(BigInt(r.timestamp)),
+        tx.object(r.oracleId),
+        tx.pure.vector("u8", signature),
+        tx.object.clock(),
+        fee!,
+      ],
+    });
+    return true;
+  }
+
+  /**
+   * @description Add the prepared Switchboard submissions to the current
+   * transaction, so the aggregator is fresh before anything in this same PTB
+   * reads it. Returns how many were added; zero simply means the rule will read
+   * whatever is already on chain and abstain if that is stale.
+   */
+  private applySwitchboard(prepared: PreparedSwitchboard | undefined): number {
+    if (!prepared) return 0;
+    let added = 0;
+    for (const r of prepared.results) {
+      if (
+        this.addSwitchboardSubmission(
+          this.transaction,
+          prepared.aggregatorId,
+          prepared.queue,
+          r,
+        )
+      ) {
+        added++;
+      }
+    }
+    return added;
   }
 
   /**
@@ -932,7 +1039,22 @@ export class VirtueClient {
   async aggregatePrices(): Promise<
     Partial<Record<COLLATERAL_COIN, TransactionResult>>
   > {
-    const basicSymbol: COLLATERAL_COIN[] = ["IOTA", "iBTC"];
+    return this.aggregatePricesWith(await this.prepareOracleUpdates());
+  }
+
+  /**
+   * @description The transaction-building half of `aggregatePrices`, working
+   * only from data already fetched and validated by `prepareOracleUpdates`.
+   *
+   * Kept separate so a position build can settle whether its collateral is
+   * priceable before writing anything, then build from that exact same prepared
+   * data — no second fetch, and so no window for the answer to change in
+   * between.
+   */
+  private async aggregatePricesWith(
+    prepared: PreparedOracleUpdates,
+  ): Promise<Partial<Record<COLLATERAL_COIN, TransactionResult>>> {
+    const basicSymbol = BASIC_PRICE_SYMBOLS;
     const pythRuleConfig = this.transaction.sharedObjectRef(
       this.config.PYTH_RULE_CONFIG_OBJ,
     );
@@ -940,17 +1062,16 @@ export class VirtueClient {
     const pythPriceIds = basicSymbol.map(
       (symbol) => this.config.VAULT_MAP[symbol].pythPriceId ?? "",
     );
-    // Pyth's update aborts on chain wherever the registered guardian set trails
-    // Hermes, so this applies it only if it actually passes. An undefined entry
-    // means Pyth contributes nothing for that symbol.
-    const priceInfoObjIds = await this.updatePythPriceFeeds(pythPriceIds);
+    const priceInfoObjIds = await this.applyPythUpdate(
+      prepared.pyth,
+      pythPriceIds,
+    );
 
-    // Switchboard reads whatever was last submitted, so refresh it inside this
-    // same PTB before anything reads it. Skipped where unconfigured.
+    // Switchboard reads whatever was last submitted, so the refresh goes into
+    // this same PTB, ahead of everything that reads it.
     const switchboardAggregators = this.config.SWITCHBOARD_AGGREGATORS ?? {};
     for (const symbol of basicSymbol) {
-      const aggregatorId = switchboardAggregators[symbol];
-      if (aggregatorId) await this.crankSwitchboard(aggregatorId);
+      this.applySwitchboard(prepared.switchboard[symbol]);
     }
 
     const basicPriceResults = basicSymbol.reduce(
@@ -958,10 +1079,7 @@ export class VirtueClient {
         const coinType = this.config.COIN_TYPES[symbol];
         const priceInfoObjId = priceInfoObjIds[idx];
         const switchboardAggregatorId = switchboardAggregators[symbol];
-        const switchboardFeeds =
-          !!switchboardAggregatorId &&
-          !!this.config.SWITCHBOARD_RULE_PACKAGE_ID &&
-          !!this.config.SWITCHBOARD_RULE_CONFIG_OBJ;
+        const switchboardFeeds = this.switchboardRuleFeeds(symbol);
 
         // `aggregate` needs at least one source to reach its threshold, so a
         // symbol no rule can price is left out of the transaction altogether
@@ -986,7 +1104,7 @@ export class VirtueClient {
         // one aggregation. Unlike the Pyth rule this one is safe to add even
         // when its crank fed nothing: `feed` abstains on a stale or
         // reconfigured aggregator instead of aborting.
-        if (switchboardFeeds) {
+        if (switchboardFeeds && switchboardAggregatorId) {
           this.transaction.moveCall({
             target: `${this.config.SWITCHBOARD_RULE_PACKAGE_ID}::switchboard_rule::feed`,
             typeArguments: [coinType],
@@ -1404,31 +1522,36 @@ export class VirtueClient {
     // change the identity the caller is composing against and drop that
     // instance's plugins and intent resolvers. So the one question that can fail
     // the build is asked up front, while the transaction is still untouched.
+    let prepared: PreparedOracleUpdates | undefined;
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      if (!(await this.canPriceCollateral(collateralSymbol))) {
+      prepared = await this.prepareOracleUpdates();
+      if (!this.canPriceCollateral(collateralSymbol, prepared)) {
         throw new Error(
           `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`,
         );
       }
     }
     this.transaction.setSender(this.sender);
-    return await this.buildManagePosition(inputs);
+    return await this.buildManagePosition(inputs, prepared);
   }
 
   /**
    * @description The body of `buildManagePositionTransaction`, split out so the
    * entry point above can settle its preconditions before anything is written.
    */
-  private async buildManagePosition(inputs: {
-    collateralSymbol: COLLATERAL_COIN;
-    depositAmount: string;
-    borrowAmount: string;
-    repaymentAmount: string;
-    withdrawAmount: string;
-    accountObjId?: string;
-    recipient?: string;
-    keepTransaction?: boolean;
-  }): Promise<Transaction> {
+  private async buildManagePosition(
+    inputs: {
+      collateralSymbol: COLLATERAL_COIN;
+      depositAmount: string;
+      borrowAmount: string;
+      repaymentAmount: string;
+      withdrawAmount: string;
+      accountObjId?: string;
+      recipient?: string;
+      keepTransaction?: boolean;
+    },
+    prepared?: PreparedOracleUpdates,
+  ): Promise<Transaction> {
     const {
       collateralSymbol,
       depositAmount,
@@ -1445,7 +1568,11 @@ export class VirtueClient {
     );
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      const priceResults = await this.aggregatePrices();
+      // The same data the precondition was settled from, so the answer here
+      // cannot differ from the one already acted on.
+      const priceResults = await this.aggregatePricesWith(
+        prepared ?? (await this.prepareOracleUpdates()),
+      );
       // `canPriceCollateral` has already settled this before anything was
       // written, so reaching here means the price went away in between. Kept as
       // a backstop because `updatePosition` turns a missing price into
@@ -1497,7 +1624,10 @@ export class VirtueClient {
         this.destroyZeroCoin("VUSD", vusdCoin);
       }
       const tx = this.getTransaction();
-      this.resetTransaction();
+      // Every other builder honours `keepTransaction`; this branch alone reset
+      // unconditionally, throwing away the composition the caller asked to keep
+      // for exactly the operations that need a price.
+      if (!keepTransaction) this.resetTransaction();
       return tx;
     } else {
       let updateRequest = this.debtorRequest({

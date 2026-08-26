@@ -278,45 +278,73 @@ declare class VirtueClient {
      */
     newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
     /**
-     * @description Whether any oracle rule can currently price this collateral —
-     * i.e. whether `aggregatePrices` will return a result for it.
+     * @description Resolve everything the oracle rules need from the network,
+     * without writing anything to the transaction.
      *
-     * This exists to be asked *before* anything is written to the transaction.
-     * The answer is only knowable by probing Pyth, and `aggregatePrices` learns it
-     * as a side effect of building; acting on it afterwards would mean unwinding
-     * commands already appended, and `Transaction` cannot be rolled back in place.
-     * Rebuilding a replacement is not a substitute — it changes object identity and
-     * silently drops the instance's build/serialization plugins and intent
-     * resolvers, which a caller composing with `keepTransaction` may depend on.
+     * Building a position is not reversible. Commands can only be appended to a
+     * `Transaction`, never removed — `getData()` returns a snapshot and the
+     * builder behind it is private — and swapping in a rebuilt object is no
+     * substitute, since that changes the identity a caller is composing against
+     * and drops that instance's plugins and intent resolvers. So everything that
+     * can fail happens here, before the first command is written, and applying the
+     * result afterwards is pure transaction building.
      *
-     * Cheap in the common case: a collateral with a Switchboard aggregator is
-     * priceable by configuration alone and costs no network call. Only a
-     * Pyth-only collateral pays for the probe.
+     * The prepared data is then carried into the aggregation rather than fetched
+     * again. Probing and refetching would leave a window where the preflight
+     * passes and the real fetch fails, throwing only after the transaction had
+     * been written to — and it would pay for the same work twice.
+     */
+    private prepareOracleUpdates;
+    /**
+     * @description Whether the Switchboard rule is wired up for a symbol at all.
+     *
+     * Config alone decides this: the rule abstains on a stale or reconfigured
+     * aggregator instead of aborting, so it is safe to add even when the crank
+     * contributed nothing, and it still counts as a source that can price the
+     * symbol.
+     */
+    private switchboardRuleFeeds;
+    /**
+     * @description Whether any rule can price this collateral given what was
+     * prepared — i.e. whether `aggregatePrices` will return a result for it.
+     *
+     * Pure, and answered from the prepared data, so it can be asked before the
+     * transaction has been touched and cannot disagree with what the build then
+     * does.
      */
     private canPriceCollateral;
     /**
-     * @description Add Pyth's price-feed update to the current transaction and
-     * return the `PriceInfoObject` ids that `pyth_rule::feed` should read.
+     * @description Fetch Pyth update data and prove it verifies on chain, without
+     * touching the current transaction.
      *
-     * Like the Switchboard crank this never throws, and it goes one step further:
-     * it also refuses to leave an update in the transaction that would abort on
-     * chain. A Pyth update carries a Wormhole VAA, and `vaa::parse_and_verify`
-     * aborts outright once Hermes has moved to a guardian set newer than the one
-     * registered on IOTA — which is the state mainnet is in. That abort is not an
-     * SDK error; it takes down the entire PTB, borrow or liquidation included. So
-     * the update is devInspected on its own first and only applied if it passes.
+     * A Pyth update carries a Wormhole VAA, and `vaa::parse_and_verify` aborts
+     * outright once Hermes has moved to a guardian set newer than the one
+     * registered on IOTA. That abort is not an SDK error — it takes down the whole
+     * PTB, borrow or liquidation included — so the update is devInspected on a
+     * throwaway transaction first and only data that passes is returned.
      *
-     * When it does not pass — or Hermes is unreachable — every entry comes back
-     * undefined and the caller drops `pyth_rule::feed` for that symbol. The rule
-     * cannot be pointed at the un-updated `PriceInfoObject` as a consolation:
-     * `pyth_rule::feed` does not abstain on a stale price, it aborts through
-     * `pyth::check_price_is_fresh`, which would take the PTB down exactly the way
-     * a failed update does. Not feeding is the only safe fallback.
+     * Never throws; an unreachable Hermes or a failing probe both come back
+     * `null`, and the caller drops the Pyth rule for those symbols.
      */
-    private updatePythPriceFeeds;
+    private preparePythUpdate;
     /**
-     * @description Fetch signed Switchboard responses and add the ones that will
-     * actually validate on chain to the current transaction.
+     * @description Add the prepared Pyth update to the current transaction and
+     * return the `PriceInfoObject` ids `pyth_rule::feed` should read.
+     *
+     * The probe in `preparePythUpdate` already drove the same call once, which
+     * populated the Pyth client's package, base-fee and price-object caches, so
+     * this is transaction building rather than another round of I/O.
+     *
+     * An undefined entry means Pyth contributes nothing for that symbol, and the
+     * caller drops `pyth_rule::feed` for it. The rule cannot be pointed at the
+     * un-updated `PriceInfoObject` as a consolation: it does not abstain on a
+     * stale price, it aborts through `pyth::check_price_is_fresh`, taking the PTB
+     * down exactly the way a failed update does.
+     */
+    private applyPythUpdate;
+    /**
+     * @description Fetch signed Switchboard responses and keep the ones that will
+     * actually validate on chain, without touching the current transaction.
      *
      * Switchboard is on-demand, not push: `Aggregator.current_result` only changes
      * when someone submits a signed oracle response. Left alone the IOTA mainnet
@@ -331,29 +359,43 @@ declare class VirtueClient {
      *   time. `numSignatures` asks for the whole set instead.
      * - A PTB is all-or-nothing, so one broken oracle would take the entire price
      *   read — and whatever borrow or liquidation is bundled with it — down too.
-     *   Each response is therefore devInspected on its own first and only the
-     *   survivors are added.
+     *   Each response is therefore devInspected on its own and only the survivors
+     *   are kept.
      *
-     * Returns the number of submissions added, and **never throws**: a crossbar
-     * outage, a slow endpoint, a malformed response, or an RPC failure all resolve
-     * to `0`. Switchboard is one rule among several, so raising here would take
-     * down price reads — and every position build that depends on them — that the
-     * other rules could have served on their own. Contributing nothing is the
-     * correct failure mode: the decision then belongs on chain, where `aggregate`
-     * aborts by itself if no rule supplied a usable price.
-     *
-     * Zero also covers the case where every oracle simply failed validation, in
-     * which case `switchboard_rule::feed` falls back to whatever result is already
-     * on chain — which its freshness gate will reject if it is stale, making the
-     * rule abstain rather than quoting a stale price.
+     * Never throws: a crossbar outage, a slow endpoint, a malformed response or an
+     * RPC failure all come back `null`. Switchboard is one rule among several, so
+     * raising here would take down price reads that the others could have served.
      */
-    private crankSwitchboard;
+    private prepareSwitchboard;
+    /**
+     * @description Append one `aggregator_submit_result_action::run` call. Pure —
+     * no I/O — so replaying a response that already passed its probe cannot fail.
+     * Returns false for a signature that is not the 65 bytes the action expects.
+     */
+    private addSwitchboardSubmission;
+    /**
+     * @description Add the prepared Switchboard submissions to the current
+     * transaction, so the aggregator is fresh before anything in this same PTB
+     * reads it. Returns how many were added; zero simply means the rule will read
+     * whatever is already on chain and abstain if that is stale.
+     */
+    private applySwitchboard;
     /**
      * @description Get a price result
      * @param collateral coin symbol, e.g "IOTA"
      * @return [PriceResult]
      */
     aggregatePrices(): Promise<Partial<Record<COLLATERAL_COIN, TransactionResult>>>;
+    /**
+     * @description The transaction-building half of `aggregatePrices`, working
+     * only from data already fetched and validated by `prepareOracleUpdates`.
+     *
+     * Kept separate so a position build can settle whether its collateral is
+     * priceable before writing anything, then build from that exact same prepared
+     * data — no second fetch, and so no window for the answer to change in
+     * between.
+     */
+    private aggregatePricesWith;
     /**
      * @description Get a request to Mange Position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"

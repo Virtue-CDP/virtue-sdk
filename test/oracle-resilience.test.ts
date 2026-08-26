@@ -249,6 +249,58 @@ describe("oracle source resilience", () => {
     expect(pluginRuns).toBe(1);
   }, 60_000);
 
+  /**
+   * The preflight that decides whether a collateral is priceable must hand its
+   * validated update to the build, not just its verdict. Checking and then
+   * refetching leaves a window where the check passes and the refetch fails —
+   * and by then the transaction has been written to and cannot be unwound.
+   */
+  it("carries the prepared Pyth update into the build instead of fetching twice", async () => {
+    const client = new VirtueClient({
+      sender:
+        "0x08e00db614b1024014b33f86e9d0baf76a48649b317d1517536502c521d20322",
+    });
+    client.resetTransaction();
+
+    const callerTx = client.getTransaction();
+    callerTx.moveCall({
+      target: "0x2::clock::timestamp_ms",
+      arguments: [callerTx.object.clock()],
+    });
+    const commandsBefore = callerTx.getData().commands.length;
+
+    // Hermes answers once and then goes away — the transient boundary a
+    // check-then-refetch would fall through.
+    const conn = client.getPythConnection();
+    const realFetchUpdate = conn.getPriceFeedsUpdateData.bind(conn);
+    let hermesCalls = 0;
+    vi.spyOn(conn, "getPriceFeedsUpdateData").mockImplementation(
+      async (ids: string[]) => {
+        hermesCalls += 1;
+        if (hermesCalls > 1) throw new Error("hermes went away");
+        return realFetchUpdate(ids);
+      },
+    );
+
+    // iBTC is the case that matters: Pyth is its only source, so its
+    // priceability rests entirely on that one update.
+    const returned = await client.buildManagePositionTransaction({
+      collateralSymbol: "iBTC",
+      depositAmount: "0",
+      borrowAmount: "10000",
+      repaymentAmount: "0",
+      withdrawAmount: "0",
+      keepTransaction: true,
+    });
+
+    // The update was fetched once and reused, so the second failure never happened.
+    expect(hermesCalls).toBe(1);
+    // ...and the position was built onto the caller's own instance.
+    expect(returned).toBe(callerTx);
+    expect(client.getTransaction()).toBe(callerTx);
+    expect(callerTx.getData().commands.length).toBeGreaterThan(commandsBefore);
+  }, 60_000);
+
   it("does not throw from the SDK when every update path is down", async () => {
     breakCrossbar("reject");
     const client = new VirtueClient({});
