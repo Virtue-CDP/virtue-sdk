@@ -700,6 +700,61 @@ export class VirtueClient {
   }
 
   /**
+   * @description Add Pyth's price-feed update to the current transaction and
+   * return the `PriceInfoObject` ids that `pyth_rule::feed` should read.
+   *
+   * Like the Switchboard crank this never throws, and it goes one step further:
+   * it also refuses to leave an update in the transaction that would abort on
+   * chain. A Pyth update carries a Wormhole VAA, and `vaa::parse_and_verify`
+   * aborts outright once Hermes has moved to a guardian set newer than the one
+   * registered on IOTA — which is the state mainnet is in. That abort is not an
+   * SDK error; it takes down the entire PTB, borrow or liquidation included. So
+   * the update is devInspected on its own first and only applied if it passes.
+   *
+   * When it does not pass — or Hermes is unreachable — the ids are resolved
+   * read-only instead and no update is added. `pyth_rule::feed` then prices from
+   * whatever the `PriceInfoObject` already holds, and its own staleness gate
+   * decides whether that is usable, feeding nothing rather than quoting a stale
+   * price. An undefined entry means even the read-only lookup failed, and the
+   * caller drops the rule entirely for that symbol.
+   */
+  private async updatePythPriceFeeds(
+    pythPriceIds: string[],
+  ): Promise<(string | undefined)[]> {
+    const readOnlyIds = () =>
+      Promise.all(
+        pythPriceIds.map((id) =>
+          this.pythClient.getPriceFeedObjectId(id).catch(() => undefined),
+        ),
+      );
+
+    try {
+      const updateData =
+        await this.pythConnection.getPriceFeedsUpdateData(pythPriceIds);
+
+      const probe = new Transaction();
+      await this.pythClient.updatePriceFeeds(
+        probe as any,
+        updateData,
+        pythPriceIds,
+      );
+      const inspect = await this.iotaClient.devInspectTransactionBlock({
+        sender: DUMMY_ADDRESS,
+        transactionBlock: probe,
+      });
+      if (inspect.effects.status.status !== "success") return readOnlyIds();
+
+      return await this.pythClient.updatePriceFeeds(
+        this.transaction as any,
+        updateData,
+        pythPriceIds,
+      );
+    } catch {
+      return readOnlyIds();
+    }
+  }
+
+  /**
    * @description Fetch signed Switchboard responses and add the ones that will
    * actually validate on chain to the current transaction.
    *
@@ -835,14 +890,10 @@ export class VirtueClient {
     const pythPriceIds = basicSymbol.map(
       (symbol) => this.config.VAULT_MAP[symbol].pythPriceId ?? "",
     );
-    const updateData =
-      await this.pythConnection.getPriceFeedsUpdateData(pythPriceIds);
-
-    const priceInfoObjIds = await this.pythClient.updatePriceFeeds(
-      this.transaction as any,
-      updateData,
-      pythPriceIds,
-    );
+    // Pyth's update aborts on chain wherever the registered guardian set trails
+    // Hermes, so this applies it only if it actually passes and otherwise falls
+    // back to reading the existing PriceInfoObject.
+    const priceInfoObjIds = await this.updatePythPriceFeeds(pythPriceIds);
 
     // Switchboard reads whatever was last submitted, so refresh it inside this
     // same PTB before anything reads it. Skipped where unconfigured.
@@ -856,17 +907,22 @@ export class VirtueClient {
       (result, symbol, idx) => {
         const coinType = this.config.COIN_TYPES[symbol];
         const collector = this.newPriceCollector(symbol);
-        this.transaction.moveCall({
-          target: `${this.config.PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
-          typeArguments: [coinType],
-          arguments: [
-            collector,
-            pythRuleConfig,
-            this.transaction.object.clock(),
-            pythStateObj,
-            this.transaction.object(priceInfoObjIds[idx]),
-          ],
-        });
+        // No id at all means the PriceInfoObject could not even be located, so
+        // there is nothing for the rule to read and it is left out.
+        const priceInfoObjId = priceInfoObjIds[idx];
+        if (priceInfoObjId) {
+          this.transaction.moveCall({
+            target: `${this.config.PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
+            typeArguments: [coinType],
+            arguments: [
+              collector,
+              pythRuleConfig,
+              this.transaction.object.clock(),
+              pythStateObj,
+              this.transaction.object(priceInfoObjId),
+            ],
+          });
+        }
         // Switchboard contributes to the same collector, so both rules land in
         // one aggregation. `feed` abstains on its own if the result is stale or
         // the aggregator has been reconfigured out from under its registration.

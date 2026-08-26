@@ -270,6 +270,26 @@ declare class VirtueClient {
      */
     newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
     /**
+     * @description Add Pyth's price-feed update to the current transaction and
+     * return the `PriceInfoObject` ids that `pyth_rule::feed` should read.
+     *
+     * Like the Switchboard crank this never throws, and it goes one step further:
+     * it also refuses to leave an update in the transaction that would abort on
+     * chain. A Pyth update carries a Wormhole VAA, and `vaa::parse_and_verify`
+     * aborts outright once Hermes has moved to a guardian set newer than the one
+     * registered on IOTA — which is the state mainnet is in. That abort is not an
+     * SDK error; it takes down the entire PTB, borrow or liquidation included. So
+     * the update is devInspected on its own first and only applied if it passes.
+     *
+     * When it does not pass — or Hermes is unreachable — the ids are resolved
+     * read-only instead and no update is added. `pyth_rule::feed` then prices from
+     * whatever the `PriceInfoObject` already holds, and its own staleness gate
+     * decides whether that is usable, feeding nothing rather than quoting a stale
+     * price. An undefined entry means even the read-only lookup failed, and the
+     * caller drops the rule entirely for that symbol.
+     */
+    private updatePythPriceFeeds;
+    /**
      * @description Fetch signed Switchboard responses and add the ones that will
      * actually validate on chain to the current transaction.
      *
