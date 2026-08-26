@@ -298,19 +298,35 @@ declare class VirtueClient {
     /**
      * @description Whether the Switchboard rule is wired up for a symbol at all.
      *
-     * Config alone decides this: the rule abstains on a stale or reconfigured
-     * aggregator instead of aborting, so it is safe to add even when the crank
-     * contributed nothing, and it still counts as a source that can price the
-     * symbol.
+     * Config alone decides whether the rule is *added*. It abstains on a stale
+     * aggregator rather than aborting, so adding it costs nothing — but note it is
+     * not unconditionally fail-soft: the deployed rule aborts on a coin type it
+     * has no mapping for (`err_unsupported_coin_type`) or an aggregator that is
+     * not the one registered for that coin (`err_invalid_aggregator`). Live config
+     * is aligned today, and `canPriceCollateral` dev-inspects the real aggregation
+     * rather than trusting that, so a drifted rule config surfaces as "cannot
+     * price" instead of a failed transaction.
      */
     private switchboardRuleFeeds;
     /**
-     * @description Whether any rule can price this collateral given what was
-     * prepared — i.e. whether `aggregatePrices` will return a result for it.
+     * @description Whether the prepared data can actually price this collateral.
      *
-     * Pure, and answered from the prepared data, so it can be asked before the
-     * transaction has been touched and cannot disagree with what the build then
-     * does.
+     * Answered by building the aggregation on a throwaway transaction and
+     * dev-inspecting it, rather than by reasoning about which rules are
+     * configured. Configuration is not the question — being wired up to
+     * Switchboard says nothing about whether its aggregator still holds a result
+     * the rule will accept. With nothing cranked and a stale aggregator the rule
+     * abstains, `aggregate` fails its threshold with
+     * `err_total_weight_not_enough`, and a predicate that had said "yes" would
+     * already have written a doomed position onto the caller's transaction.
+     *
+     * Running the real thing also covers what a predicate would miss: a rule
+     * config that has drifted from the aggregator it is asked about, a Pyth feed
+     * whose `PriceInfoObject` is too stale for its own freshness gate, or any
+     * future rule with its own abort conditions.
+     *
+     * The caller's transaction is swapped out for the duration and restored, so
+     * this leaves nothing behind either way.
      */
     private canPriceCollateral;
     /**

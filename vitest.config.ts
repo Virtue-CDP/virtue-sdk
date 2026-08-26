@@ -12,8 +12,12 @@ export default defineConfig({
      * them throttled — tests that pass comfortably on their own then time out.
      * Run the files one at a time so the suite is bounded by the RPC rather
      * than fighting it.
+     *
+     * `singleThread`, not `fileParallelism` — the latter arrived in Vitest 1.x
+     * and this project is pinned to 0.34.6, where an unknown key is accepted
+     * and silently ignored.
      */
-    fileParallelism: false,
+    singleThread: true,
   },
   resolve: {
     alias: {

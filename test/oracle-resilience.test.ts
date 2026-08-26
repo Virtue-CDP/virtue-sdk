@@ -301,6 +301,123 @@ describe("oracle source resilience", () => {
     expect(callerTx.getData().commands.length).toBeGreaterThan(commandsBefore);
   }, 60_000);
 
+  /**
+   * `Buffer` is a Node global that browser bundles do not provide. A
+   * ReferenceError here would be swallowed by the fail-soft catch around
+   * preparation, so Switchboard would simply never contribute in a dApp — and
+   * the failure would be invisible until the day Pyth is the source that broke.
+   */
+  it("decodes response signatures without the Node Buffer global", () => {
+    const client = new VirtueClient({});
+    client.resetTransaction();
+    const tx = client.getTransaction();
+    const response = {
+      successValue: "43900000000000000",
+      isNegative: false,
+      timestamp: 1787734024,
+      signature: `0x${"ab".repeat(65)}`,
+      oracleId: `0x${"3".repeat(64)}`,
+    };
+
+    const savedBuffer = (globalThis as { Buffer?: unknown }).Buffer;
+    delete (globalThis as { Buffer?: unknown }).Buffer;
+    let added: boolean;
+    try {
+      added = (client as any).addSwitchboardSubmission(
+        tx,
+        `0x${"4".repeat(64)}`,
+        `0x${"5".repeat(64)}`,
+        response,
+      );
+    } finally {
+      (globalThis as { Buffer?: unknown }).Buffer = savedBuffer;
+    }
+
+    expect(added).toBe(true);
+    expect(tx.getData().commands.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Being wired up to Switchboard is not the same as Switchboard currently
+   * having a price. With nothing cranked and the aggregator stale the rule
+   * abstains and `aggregate` fails its threshold, so a precondition that
+   * answered from configuration would hand back a transaction that cannot
+   * execute — after writing it onto the caller's instance.
+   */
+  it("refuses to build, untouched, when IOTA's configured sources are all down", async () => {
+    const client = new VirtueClient({ sender: `0x${"2".repeat(64)}` });
+    client.resetTransaction();
+
+    const callerTx = client.getTransaction();
+    callerTx.setSender(`0x${"1".repeat(64)}`);
+    callerTx.moveCall({
+      target: "0x2::clock::timestamp_ms",
+      arguments: [callerTx.object.clock()],
+    });
+    const before = callerTx.serialize();
+
+    breakCrossbar("reject");
+    breakHermes(client);
+
+    // IOTA *is* wired to a Switchboard aggregator — that is the point. Nothing
+    // can crank it, so nothing can price IOTA either.
+    await expect(
+      client.buildManagePositionTransaction({
+        collateralSymbol: "IOTA",
+        depositAmount: "0",
+        borrowAmount: "10000",
+        repaymentAmount: "0",
+        withdrawAmount: "0",
+        keepTransaction: true,
+      }),
+    ).rejects.toThrow(/No oracle rule could price/);
+
+    expect(client.getTransaction()).toBe(callerTx);
+    expect(callerTx.serialize()).toBe(before);
+    expect(callerTx.getData().sender).toBe(`0x${"1".repeat(64)}`);
+  }, 90_000);
+
+  /**
+   * A Switchboard submission is only accepted for `max_staleness_seconds` after
+   * the oracle signed it, and it runs before the aggregation, so an expired one
+   * aborts the whole PTB. A transaction going to a wallet may be approved well
+   * after that window, so it must not carry one when Pyth already has the price.
+   */
+  it("puts no expiring Switchboard submission in a transaction bound for signing", async () => {
+    const client = new VirtueClient({
+      sender:
+        "0x08e00db614b1024014b33f86e9d0baf76a48649b317d1517536502c521d20322",
+    });
+    client.resetTransaction();
+
+    const tx = await client.buildManagePositionTransaction({
+      collateralSymbol: "IOTA",
+      depositAmount: "0",
+      borrowAmount: "10000",
+      repaymentAmount: "0",
+      withdrawAmount: "0",
+      keepTransaction: true,
+    });
+
+    const calls = (tx.getData().commands as any[])
+      .map((c) =>
+        c.MoveCall ? `${c.MoveCall.module}::${c.MoveCall.function}` : "",
+      )
+      .filter(Boolean);
+    // Pyth carries this one, so nothing with a deadline goes to the wallet...
+    expect(calls).not.toContain("aggregator_submit_result_action::run");
+    expect(calls).toContain("pyth::update_single_price_feed");
+    // ...while the read path, which dry-runs immediately, still cranks.
+    client.resetTransaction();
+    await client.aggregatePrices();
+    const readCalls = (client.getTransaction().getData().commands as any[])
+      .map((c) =>
+        c.MoveCall ? `${c.MoveCall.module}::${c.MoveCall.function}` : "",
+      )
+      .filter(Boolean);
+    expect(readCalls).toContain("aggregator_submit_result_action::run");
+  }, 90_000);
+
   it("does not throw from the SDK when every update path is down", async () => {
     breakCrossbar("reject");
     const client = new VirtueClient({});

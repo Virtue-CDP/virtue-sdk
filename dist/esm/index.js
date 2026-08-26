@@ -454,7 +454,11 @@ import {
   IotaPythClient
 } from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
-import { normalizeIotaAddress as normalizeIotaAddress2, normalizeStructTag } from "@iota/iota-sdk/utils";
+import {
+  fromHEX,
+  normalizeIotaAddress as normalizeIotaAddress2,
+  normalizeStructTag
+} from "@iota/iota-sdk/utils";
 var SWITCHBOARD_CRANK_TIMEOUT_MS = 5e3;
 var BASIC_PRICE_SYMBOLS = ["IOTA", "iBTC"];
 var getCoinSymbol2 = (coinType, coinTypes) => {
@@ -1020,44 +1024,75 @@ var VirtueClient = class {
    * passes and the real fetch fails, throwing only after the transaction had
    * been written to — and it would pay for the same work twice.
    */
-  async prepareOracleUpdates(basicSymbols = BASIC_PRICE_SYMBOLS) {
+  async prepareOracleUpdates(opts = {}, basicSymbols = BASIC_PRICE_SYMBOLS) {
     const pythPriceIds = basicSymbols.map(
       (symbol) => this.config.VAULT_MAP[symbol].pythPriceId ?? ""
     );
     const switchboardAggregators = this.config.SWITCHBOARD_AGGREGATORS ?? {};
     const pyth = await this.preparePythUpdate(pythPriceIds);
+    const skipCrank = !!opts.forDeferredSigning && !!pyth;
     const switchboard = {};
-    for (const symbol of basicSymbols) {
-      const aggregatorId = switchboardAggregators[symbol];
-      if (!aggregatorId) continue;
-      const prepared = await this.prepareSwitchboard(aggregatorId);
-      if (prepared) switchboard[symbol] = prepared;
+    if (!skipCrank) {
+      for (const symbol of basicSymbols) {
+        const aggregatorId = switchboardAggregators[symbol];
+        if (!aggregatorId) continue;
+        const prepared = await this.prepareSwitchboard(aggregatorId);
+        if (prepared) switchboard[symbol] = prepared;
+      }
     }
     return { pyth, switchboard };
   }
   /**
    * @description Whether the Switchboard rule is wired up for a symbol at all.
    *
-   * Config alone decides this: the rule abstains on a stale or reconfigured
-   * aggregator instead of aborting, so it is safe to add even when the crank
-   * contributed nothing, and it still counts as a source that can price the
-   * symbol.
+   * Config alone decides whether the rule is *added*. It abstains on a stale
+   * aggregator rather than aborting, so adding it costs nothing — but note it is
+   * not unconditionally fail-soft: the deployed rule aborts on a coin type it
+   * has no mapping for (`err_unsupported_coin_type`) or an aggregator that is
+   * not the one registered for that coin (`err_invalid_aggregator`). Live config
+   * is aligned today, and `canPriceCollateral` dev-inspects the real aggregation
+   * rather than trusting that, so a drifted rule config surfaces as "cannot
+   * price" instead of a failed transaction.
    */
   switchboardRuleFeeds(symbol) {
     return !!this.config.SWITCHBOARD_AGGREGATORS?.[symbol] && !!this.config.SWITCHBOARD_RULE_PACKAGE_ID && !!this.config.SWITCHBOARD_RULE_CONFIG_OBJ;
   }
   /**
-   * @description Whether any rule can price this collateral given what was
-   * prepared — i.e. whether `aggregatePrices` will return a result for it.
+   * @description Whether the prepared data can actually price this collateral.
    *
-   * Pure, and answered from the prepared data, so it can be asked before the
-   * transaction has been touched and cannot disagree with what the build then
-   * does.
+   * Answered by building the aggregation on a throwaway transaction and
+   * dev-inspecting it, rather than by reasoning about which rules are
+   * configured. Configuration is not the question — being wired up to
+   * Switchboard says nothing about whether its aggregator still holds a result
+   * the rule will accept. With nothing cranked and a stale aggregator the rule
+   * abstains, `aggregate` fails its threshold with
+   * `err_total_weight_not_enough`, and a predicate that had said "yes" would
+   * already have written a doomed position onto the caller's transaction.
+   *
+   * Running the real thing also covers what a predicate would miss: a rule
+   * config that has drifted from the aggregator it is asked about, a Pyth feed
+   * whose `PriceInfoObject` is too stale for its own freshness gate, or any
+   * future rule with its own abort conditions.
+   *
+   * The caller's transaction is swapped out for the duration and restored, so
+   * this leaves nothing behind either way.
    */
-  canPriceCollateral(collateralSymbol, prepared) {
-    const symbol = collateralSymbol === "stIOTA" || collateralSymbol === "vIOTA" ? "IOTA" : collateralSymbol;
-    if (this.switchboardRuleFeeds(symbol)) return true;
-    return !!prepared.pyth && !!this.config.VAULT_MAP[symbol].pythPriceId;
+  async canPriceCollateral(collateralSymbol, prepared) {
+    const callerTransaction = this.transaction;
+    this.transaction = new Transaction();
+    try {
+      const priceResults = await this.aggregatePricesWith(prepared);
+      if (!priceResults[collateralSymbol]) return false;
+      const inspect = await this.iotaClient.devInspectTransactionBlock({
+        sender: DUMMY_ADDRESS,
+        transactionBlock: this.transaction
+      });
+      return inspect.effects.status.status === "success";
+    } catch {
+      return false;
+    } finally {
+      this.transaction = callerTransaction;
+    }
   }
   /**
    * @description Fetch Pyth update data and prove it verifies on chain, without
@@ -1194,9 +1229,12 @@ var VirtueClient = class {
   addSwitchboardSubmission(tx, aggregatorId, queue, r) {
     const pkg = this.config.SWITCHBOARD_PACKAGE_ID;
     if (!pkg) return false;
-    const signature = Uint8Array.from(
-      Buffer.from(r.signature.replace(/^0x/, ""), "hex")
-    );
+    let signature;
+    try {
+      signature = fromHEX(r.signature);
+    } catch {
+      return false;
+    }
     if (signature.length !== 65) return false;
     const [fee] = tx.splitCoins(tx.gas, [0]);
     tx.moveCall({
@@ -1630,8 +1668,8 @@ var VirtueClient = class {
     if (!this.sender) throw new Error("Sender is not set");
     let prepared;
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      prepared = await this.prepareOracleUpdates();
-      if (!this.canPriceCollateral(collateralSymbol, prepared)) {
+      prepared = await this.prepareOracleUpdates({ forDeferredSigning: true });
+      if (!await this.canPriceCollateral(collateralSymbol, prepared)) {
         throw new Error(
           `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`
         );
