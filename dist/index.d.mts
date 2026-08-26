@@ -185,9 +185,17 @@ declare class VirtueClient {
     getPythClient(): IotaPythClient;
     getAllCollateralSymbol(): COLLATERAL_COIN[];
     /**
-     * @description
+     * @description Price every collateral by dry-running `aggregatePrices` and
+     * reading the emitted `PriceAggregated` events.
+     *
+     * A symbol is **absent** from the result when no oracle rule could price it —
+     * `aggregatePrices` leaves such a symbol out of the transaction, so it emits
+     * no event. iBTC is the live example: it is fed by Pyth alone, so it drops out
+     * whenever the Pyth update cannot be applied, while IOTA carries on through
+     * Switchboard. The return type is `Partial` to say so; treat a missing entry
+     * as "no price available right now", never as zero.
      */
-    getCollateralPrices(): Promise<Record<COLLATERAL_COIN, number>>;
+    getCollateralPrices(): Promise<Partial<Record<COLLATERAL_COIN, number>>>;
     /**
      * @description Get all vault objects
      */

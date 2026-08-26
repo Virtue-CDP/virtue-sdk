@@ -35,6 +35,11 @@ describe("Interacting with VirtueClient", () => {
   it("test getCollateralPrices() function", async () => {
     client.resetTransaction();
     const prices = await client.getCollateralPrices();
+    // A symbol is absent when no rule could price it, so pin that all three are
+    // actually here before comparing them.
+    assert(prices.IOTA !== undefined, "IOTA has no price");
+    assert(prices.stIOTA !== undefined, "stIOTA has no price");
+    assert(prices.vIOTA !== undefined, "vIOTA has no price");
     expect(prices.stIOTA).toBeGreaterThan(prices.IOTA);
     expect(prices.vIOTA).toBeGreaterThan(prices.IOTA);
     client.resetTransaction();

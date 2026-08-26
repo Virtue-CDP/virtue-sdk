@@ -133,9 +133,19 @@ export class VirtueClient {
   /* ----- Query ----- */
 
   /**
-   * @description
+   * @description Price every collateral by dry-running `aggregatePrices` and
+   * reading the emitted `PriceAggregated` events.
+   *
+   * A symbol is **absent** from the result when no oracle rule could price it —
+   * `aggregatePrices` leaves such a symbol out of the transaction, so it emits
+   * no event. iBTC is the live example: it is fed by Pyth alone, so it drops out
+   * whenever the Pyth update cannot be applied, while IOTA carries on through
+   * Switchboard. The return type is `Partial` to say so; treat a missing entry
+   * as "no price available right now", never as zero.
    */
-  async getCollateralPrices(): Promise<Record<COLLATERAL_COIN, number>> {
+  async getCollateralPrices(): Promise<
+    Partial<Record<COLLATERAL_COIN, number>>
+  > {
     this.resetTransaction();
     await this.aggregatePrices();
     this.transaction.setSender(DUMMY_ADDRESS);
@@ -158,7 +168,7 @@ export class VirtueClient {
           return result;
         }
       },
-      {} as Record<COLLATERAL_COIN, number>,
+      {} as Partial<Record<COLLATERAL_COIN, number>>,
     );
   }
 
