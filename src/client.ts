@@ -696,6 +696,116 @@ export class VirtueClient {
     });
   }
 
+
+  /**
+   * @description Fetch signed Switchboard responses and add the ones that will
+   * actually validate on chain to the current transaction.
+   *
+   * Switchboard is on-demand, not push: `Aggregator.current_result` only changes
+   * when someone submits a signed oracle response. Left alone the IOTA mainnet
+   * feed sat 330 days stale, so the crank belongs in the same PTB as the read.
+   *
+   * Two things make this awkward, both handled here:
+   *
+   * - Most oracles on the IOTA queues are broken — their signature no longer
+   *   recovers to the `secp256k1_key` in their on-chain `Oracle` object, so
+   *   `aggregator_submit_result_action::validate` aborts. Crossbar hands out one
+   *   at random per request, so a plain crank succeeds about a quarter of the
+   *   time. `numSignatures` asks for the whole set instead.
+   * - A PTB is all-or-nothing, so one broken oracle would take the entire price
+   *   read — and whatever borrow or liquidation is bundled with it — down too.
+   *   Each response is therefore devInspected on its own first and only the
+   *   survivors are added.
+   *
+   * Returns the number of submissions added. Zero means every oracle failed, in
+   * which case nothing is added and `switchboard_rule::feed` falls back to
+   * whatever result is already on chain — which its freshness gate will reject if
+   * it is stale, making the rule abstain rather than quoting a stale price.
+   */
+  private async crankSwitchboard(
+    aggregatorId: string,
+    numSignatures = 8,
+  ): Promise<number> {
+    const pkg = this.config.SWITCHBOARD_PACKAGE_ID;
+    if (!pkg) return 0;
+
+    const res = await fetch(
+      `https://crossbar.switchboard.xyz/updates/iota/mainnet/${aggregatorId}?numSignatures=${numSignatures}`,
+    );
+    if (!res.ok) return 0;
+    const body = (await res.json()) as {
+      responses?: {
+        results?: {
+          successValue: string;
+          isNegative: boolean;
+          timestamp: number;
+          signature: string;
+          oracleId: string;
+        }[];
+      }[];
+    };
+    const results = (body.responses ?? [])
+      .flatMap((r) => r.results ?? [])
+      // `"00"` is crossbar's placeholder for an oracle that did not sign.
+      .filter((r) => r.signature && r.signature !== "00" && r.successValue);
+    if (results.length === 0) return 0;
+
+    const aggObj = await this.iotaClient.getObject({
+      id: aggregatorId,
+      options: { showContent: true },
+    });
+    const queue = (aggObj.data?.content as any)?.fields?.queue as string;
+    if (!queue) return 0;
+
+    const submit = (tx: Transaction, r: (typeof results)[number]) => {
+      const signature = Uint8Array.from(
+        Buffer.from(r.signature.replace(/^0x/, ""), "hex"),
+      );
+      if (signature.length !== 65) return false;
+      // The queue fee is 0, but `run` still asserts the coin type it accepts.
+      const [fee] = tx.splitCoins(tx.gas, [0]);
+      tx.moveCall({
+        target: `${pkg}::aggregator_submit_result_action::run`,
+        typeArguments: ["0x2::iota::IOTA"],
+        arguments: [
+          tx.object(aggregatorId),
+          tx.object(queue),
+          tx.pure.u128(BigInt(r.successValue.replace(/^-/, ""))),
+          tx.pure.bool(r.isNegative || r.successValue.startsWith("-")),
+          tx.pure.u64(BigInt(r.timestamp)),
+          tx.object(r.oracleId),
+          tx.pure.vector("u8", signature),
+          tx.object.clock(),
+          fee!,
+        ],
+      });
+      return true;
+    };
+
+    const sender = DUMMY_ADDRESS;
+    const verdicts = await Promise.all(
+      results.map(async (r) => {
+        const probe = new Transaction();
+        if (!submit(probe, r)) return undefined;
+        try {
+          const inspect = await this.iotaClient.devInspectTransactionBlock({
+            sender,
+            transactionBlock: probe,
+          });
+          return inspect.effects.status.status === "success" ? r : undefined;
+        } catch {
+          return undefined;
+        }
+      }),
+    );
+
+    let added = 0;
+    for (const r of verdicts) {
+      if (r && submit(this.transaction, r)) added++;
+    }
+    return added;
+  }
+
   /**
    * @description Get a price result
    * @param collateral coin symbol, e.g "IOTA"
@@ -719,6 +829,14 @@ export class VirtueClient {
       pythPriceIds,
     );
 
+    // Switchboard reads whatever was last submitted, so refresh it inside this
+    // same PTB before anything reads it. Skipped where unconfigured.
+    const switchboardAggregators = this.config.SWITCHBOARD_AGGREGATORS ?? {};
+    for (const symbol of basicSymbol) {
+      const aggregatorId = switchboardAggregators[symbol];
+      if (aggregatorId) await this.crankSwitchboard(aggregatorId);
+    }
+
     const basicPriceResults = basicSymbol.reduce(
       (result, symbol, idx) => {
         const coinType = this.config.COIN_TYPES[symbol];
@@ -734,6 +852,28 @@ export class VirtueClient {
             this.transaction.object(priceInfoObjIds[idx]),
           ],
         });
+        // Switchboard contributes to the same collector, so both rules land in
+        // one aggregation. `feed` abstains on its own if the result is stale or
+        // the aggregator has been reconfigured out from under its registration.
+        const switchboardAggregatorId = switchboardAggregators[symbol];
+        if (
+          switchboardAggregatorId &&
+          this.config.SWITCHBOARD_RULE_PACKAGE_ID &&
+          this.config.SWITCHBOARD_RULE_CONFIG_OBJ
+        ) {
+          this.transaction.moveCall({
+            target: `${this.config.SWITCHBOARD_RULE_PACKAGE_ID}::switchboard_rule::feed`,
+            typeArguments: [coinType],
+            arguments: [
+              collector,
+              this.transaction.sharedObjectRef(
+                this.config.SWITCHBOARD_RULE_CONFIG_OBJ,
+              ),
+              this.transaction.object.clock(),
+              this.transaction.object(switchboardAggregatorId),
+            ],
+          });
+        }
         const priceResult = this.transaction.moveCall({
           target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
           typeArguments: [coinType],

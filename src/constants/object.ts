@@ -43,6 +43,17 @@ export type ConfigType = {
   VCERT_NATIVE_POOL_OBJ: SharedObjectRef;
   VCERT_METADATA_OBJ: SharedObjectRef;
 
+  /**
+   * Switchboard On-Demand. Optional: where these are absent `aggregatePrices`
+   * skips the crank and the `switchboard_rule::feed` call entirely, which is what
+   * testnet does — there is no deployment there.
+   */
+  SWITCHBOARD_PACKAGE_ID?: string;
+  SWITCHBOARD_RULE_PACKAGE_ID?: string;
+  SWITCHBOARD_RULE_CONFIG_OBJ?: SharedObjectRef;
+  /** Coin symbol -> the one `Aggregator` object `feed<T>` accepts for it. */
+  SWITCHBOARD_AGGREGATORS?: Partial<Record<COLLATERAL_COIN, string>>;
+
   POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
   POINT_MANAGER_OBJ: SharedObjectRef;
 
@@ -164,6 +175,20 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
         "0xb45b32d8d58c6499795036faa92b0561c6df089cdd4fc6ae8a0543981a698bf1",
       initialSharedVersion: 427133775,
       mutable: false,
+    },
+
+    SWITCHBOARD_PACKAGE_ID:
+      "0x8650249db8ffcffe8eb08b0696a8cb71e325f2afb9abc646f45344077b073ba1",
+    SWITCHBOARD_RULE_PACKAGE_ID:
+      "0x39fb7adf0abd75b31868e17706b8600cc943bc27422fb582f6e14282029cd5f0",
+    SWITCHBOARD_RULE_CONFIG_OBJ: {
+      objectId:
+        "0xa0c7b527f35476c51938d0ffd144b83cd7ee5091f516327228391b77e03afa3e",
+      initialSharedVersion: 759082916,
+      mutable: false,
+    },
+    SWITCHBOARD_AGGREGATORS: {
+      IOTA: "0x7c16ffdac553a4816db57e5e2cfbba8245337f2983b4ffb4dd944493a530c556",
     },
 
     POINT_GLOBAL_CONFIG_OBJ: {
