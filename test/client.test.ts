@@ -134,8 +134,18 @@ describe("Interacting with VirtueClient", () => {
   }, 20_000);
 
   it("test buildWithdrawStabilityPoolTransaction() function", async () => {
+    // The deposit test above is dry-run only, so nothing tops this balance back
+    // up, and the pool's scaling math erodes it as liquidations are absorbed. A
+    // hardcoded amount equal to the original deposit therefore drifts out of
+    // range and aborts with `err_balance_not_enough`; take a fraction of
+    // whatever is actually there instead.
+    const { vusdBalance } = await client.getStabilityPoolBalances();
+    assert(
+      BigInt(vusdBalance) > 0n,
+      `test wallet has no VUSD in the stability pool (balance ${vusdBalance})`,
+    );
     const tx = await client.buildWithdrawStabilityPoolTransaction({
-      withdrawAmount: "1000000", // 1VUSD
+      withdrawAmount: (BigInt(vusdBalance) / 2n).toString(),
     });
     expect(tx).toBeDefined();
     tx.setSender(client.sender);
