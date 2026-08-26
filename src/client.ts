@@ -711,22 +711,17 @@ export class VirtueClient {
    * SDK error; it takes down the entire PTB, borrow or liquidation included. So
    * the update is devInspected on its own first and only applied if it passes.
    *
-   * When it does not pass — or Hermes is unreachable — the ids are resolved
-   * read-only instead and no update is added. `pyth_rule::feed` then prices from
-   * whatever the `PriceInfoObject` already holds, and its own staleness gate
-   * decides whether that is usable, feeding nothing rather than quoting a stale
-   * price. An undefined entry means even the read-only lookup failed, and the
-   * caller drops the rule entirely for that symbol.
+   * When it does not pass — or Hermes is unreachable — every entry comes back
+   * undefined and the caller drops `pyth_rule::feed` for that symbol. The rule
+   * cannot be pointed at the un-updated `PriceInfoObject` as a consolation:
+   * `pyth_rule::feed` does not abstain on a stale price, it aborts through
+   * `pyth::check_price_is_fresh`, which would take the PTB down exactly the way
+   * a failed update does. Not feeding is the only safe fallback.
    */
   private async updatePythPriceFeeds(
     pythPriceIds: string[],
   ): Promise<(string | undefined)[]> {
-    const readOnlyIds = () =>
-      Promise.all(
-        pythPriceIds.map((id) =>
-          this.pythClient.getPriceFeedObjectId(id).catch(() => undefined),
-        ),
-      );
+    const noneFed = () => pythPriceIds.map(() => undefined);
 
     try {
       const updateData =
@@ -742,7 +737,7 @@ export class VirtueClient {
         sender: DUMMY_ADDRESS,
         transactionBlock: probe,
       });
-      if (inspect.effects.status.status !== "success") return readOnlyIds();
+      if (inspect.effects.status.status !== "success") return noneFed();
 
       return await this.pythClient.updatePriceFeeds(
         this.transaction as any,
@@ -750,7 +745,7 @@ export class VirtueClient {
         pythPriceIds,
       );
     } catch {
-      return readOnlyIds();
+      return noneFed();
     }
   }
 
@@ -881,7 +876,9 @@ export class VirtueClient {
    * @param collateral coin symbol, e.g "IOTA"
    * @return [PriceResult]
    */
-  async aggregatePrices(): Promise<Record<COLLATERAL_COIN, TransactionResult>> {
+  async aggregatePrices(): Promise<
+    Partial<Record<COLLATERAL_COIN, TransactionResult>>
+  > {
     const basicSymbol: COLLATERAL_COIN[] = ["IOTA", "iBTC"];
     const pythRuleConfig = this.transaction.sharedObjectRef(
       this.config.PYTH_RULE_CONFIG_OBJ,
@@ -891,8 +888,8 @@ export class VirtueClient {
       (symbol) => this.config.VAULT_MAP[symbol].pythPriceId ?? "",
     );
     // Pyth's update aborts on chain wherever the registered guardian set trails
-    // Hermes, so this applies it only if it actually passes and otherwise falls
-    // back to reading the existing PriceInfoObject.
+    // Hermes, so this applies it only if it actually passes. An undefined entry
+    // means Pyth contributes nothing for that symbol.
     const priceInfoObjIds = await this.updatePythPriceFeeds(pythPriceIds);
 
     // Switchboard reads whatever was last submitted, so refresh it inside this
@@ -906,10 +903,19 @@ export class VirtueClient {
     const basicPriceResults = basicSymbol.reduce(
       (result, symbol, idx) => {
         const coinType = this.config.COIN_TYPES[symbol];
-        const collector = this.newPriceCollector(symbol);
-        // No id at all means the PriceInfoObject could not even be located, so
-        // there is nothing for the rule to read and it is left out.
         const priceInfoObjId = priceInfoObjIds[idx];
+        const switchboardAggregatorId = switchboardAggregators[symbol];
+        const switchboardFeeds =
+          !!switchboardAggregatorId &&
+          !!this.config.SWITCHBOARD_RULE_PACKAGE_ID &&
+          !!this.config.SWITCHBOARD_RULE_CONFIG_OBJ;
+
+        // `aggregate` needs at least one source to reach its threshold, so a
+        // symbol no rule can price is left out of the transaction altogether
+        // rather than being aggregated into a guaranteed abort.
+        if (!priceInfoObjId && !switchboardFeeds) return result;
+
+        const collector = this.newPriceCollector(symbol);
         if (priceInfoObjId) {
           this.transaction.moveCall({
             target: `${this.config.PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
@@ -924,21 +930,17 @@ export class VirtueClient {
           });
         }
         // Switchboard contributes to the same collector, so both rules land in
-        // one aggregation. `feed` abstains on its own if the result is stale or
-        // the aggregator has been reconfigured out from under its registration.
-        const switchboardAggregatorId = switchboardAggregators[symbol];
-        if (
-          switchboardAggregatorId &&
-          this.config.SWITCHBOARD_RULE_PACKAGE_ID &&
-          this.config.SWITCHBOARD_RULE_CONFIG_OBJ
-        ) {
+        // one aggregation. Unlike the Pyth rule this one is safe to add even
+        // when its crank fed nothing: `feed` abstains on a stale or
+        // reconfigured aggregator instead of aborting.
+        if (switchboardFeeds) {
           this.transaction.moveCall({
             target: `${this.config.SWITCHBOARD_RULE_PACKAGE_ID}::switchboard_rule::feed`,
             typeArguments: [coinType],
             arguments: [
               collector,
               this.transaction.sharedObjectRef(
-                this.config.SWITCHBOARD_RULE_CONFIG_OBJ,
+                this.config.SWITCHBOARD_RULE_CONFIG_OBJ!,
               ),
               this.transaction.object.clock(),
               this.transaction.object(switchboardAggregatorId),
@@ -957,8 +959,13 @@ export class VirtueClient {
         });
         return { ...result, [symbol]: priceResult };
       },
-      {} as Record<COLLATERAL_COIN, TransactionResult>,
+      {} as Partial<Record<COLLATERAL_COIN, TransactionResult>>,
     );
+
+    // stIOTA and vIOTA are derived from the IOTA price, so they can only be
+    // built when IOTA itself got one.
+    if (!basicPriceResults.IOTA) return basicPriceResults;
+    const iotaPriceResult = basicPriceResults.IOTA;
 
     // deal with stIOTA
     const stIotaCollector = this.newPriceCollector("stIOTA");
@@ -966,7 +973,7 @@ export class VirtueClient {
       target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
       arguments: [
         stIotaCollector,
-        basicPriceResults.IOTA,
+        iotaPriceResult,
         this.transaction.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
         this.transaction.sharedObjectRef(this.config.CERT_METADATA_OBJ),
       ],
@@ -988,7 +995,7 @@ export class VirtueClient {
       target: `${this.config.VCERT_RULE_PACKAGE_ID}::vcert_rule::feed`,
       arguments: [
         vIotaCollector,
-        basicPriceResults.IOTA,
+        iotaPriceResult,
         this.transaction.sharedObjectRef(this.config.VCERT_NATIVE_POOL_OBJ),
         this.transaction.sharedObjectRef(this.config.VCERT_METADATA_OBJ),
       ],
@@ -1353,6 +1360,14 @@ export class VirtueClient {
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       const priceResults = await this.aggregatePrices();
+      // `updatePosition` turns a missing price into `option::none`, so without
+      // this the position would be built as though no price check were needed.
+      const priceResult = priceResults[collateralSymbol];
+      if (!priceResult) {
+        throw new Error(
+          `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`,
+        );
+      }
       let updateRequest = this.debtorRequest({
         collateralSymbol,
         depositCoin,
@@ -1368,7 +1383,7 @@ export class VirtueClient {
       const [collCoin, vusdCoin, response] = this.updatePosition({
         collateralSymbol,
         updateRequest,
-        priceResult: priceResults[collateralSymbol],
+        priceResult,
       });
       this.checkResponse({ collateralSymbol, response });
       if (Number(withdrawAmount) > 0) {

@@ -1006,19 +1006,15 @@ var VirtueClient = class {
    * SDK error; it takes down the entire PTB, borrow or liquidation included. So
    * the update is devInspected on its own first and only applied if it passes.
    *
-   * When it does not pass — or Hermes is unreachable — the ids are resolved
-   * read-only instead and no update is added. `pyth_rule::feed` then prices from
-   * whatever the `PriceInfoObject` already holds, and its own staleness gate
-   * decides whether that is usable, feeding nothing rather than quoting a stale
-   * price. An undefined entry means even the read-only lookup failed, and the
-   * caller drops the rule entirely for that symbol.
+   * When it does not pass — or Hermes is unreachable — every entry comes back
+   * undefined and the caller drops `pyth_rule::feed` for that symbol. The rule
+   * cannot be pointed at the un-updated `PriceInfoObject` as a consolation:
+   * `pyth_rule::feed` does not abstain on a stale price, it aborts through
+   * `pyth::check_price_is_fresh`, which would take the PTB down exactly the way
+   * a failed update does. Not feeding is the only safe fallback.
    */
   async updatePythPriceFeeds(pythPriceIds) {
-    const readOnlyIds = () => Promise.all(
-      pythPriceIds.map(
-        (id) => this.pythClient.getPriceFeedObjectId(id).catch(() => void 0)
-      )
-    );
+    const noneFed = () => pythPriceIds.map(() => void 0);
     try {
       const updateData = await this.pythConnection.getPriceFeedsUpdateData(pythPriceIds);
       const probe = new (0, _transactions.Transaction)();
@@ -1031,14 +1027,14 @@ var VirtueClient = class {
         sender: DUMMY_ADDRESS,
         transactionBlock: probe
       });
-      if (inspect.effects.status.status !== "success") return readOnlyIds();
+      if (inspect.effects.status.status !== "success") return noneFed();
       return await this.pythClient.updatePriceFeeds(
         this.transaction,
         updateData,
         pythPriceIds
       );
     } catch (e2) {
-      return readOnlyIds();
+      return noneFed();
     }
   }
   /**
@@ -1163,8 +1159,11 @@ var VirtueClient = class {
     const basicPriceResults = basicSymbol.reduce(
       (result, symbol, idx) => {
         const coinType = this.config.COIN_TYPES[symbol];
-        const collector = this.newPriceCollector(symbol);
         const priceInfoObjId = priceInfoObjIds[idx];
+        const switchboardAggregatorId = switchboardAggregators[symbol];
+        const switchboardFeeds = !!switchboardAggregatorId && !!this.config.SWITCHBOARD_RULE_PACKAGE_ID && !!this.config.SWITCHBOARD_RULE_CONFIG_OBJ;
+        if (!priceInfoObjId && !switchboardFeeds) return result;
+        const collector = this.newPriceCollector(symbol);
         if (priceInfoObjId) {
           this.transaction.moveCall({
             target: `${this.config.PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
@@ -1178,8 +1177,7 @@ var VirtueClient = class {
             ]
           });
         }
-        const switchboardAggregatorId = switchboardAggregators[symbol];
-        if (switchboardAggregatorId && this.config.SWITCHBOARD_RULE_PACKAGE_ID && this.config.SWITCHBOARD_RULE_CONFIG_OBJ) {
+        if (switchboardFeeds) {
           this.transaction.moveCall({
             target: `${this.config.SWITCHBOARD_RULE_PACKAGE_ID}::switchboard_rule::feed`,
             typeArguments: [coinType],
@@ -1207,12 +1205,14 @@ var VirtueClient = class {
       },
       {}
     );
+    if (!basicPriceResults.IOTA) return basicPriceResults;
+    const iotaPriceResult = basicPriceResults.IOTA;
     const stIotaCollector = this.newPriceCollector("stIOTA");
     this.transaction.moveCall({
       target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
       arguments: [
         stIotaCollector,
-        basicPriceResults.IOTA,
+        iotaPriceResult,
         this.transaction.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
         this.transaction.sharedObjectRef(this.config.CERT_METADATA_OBJ)
       ]
@@ -1232,7 +1232,7 @@ var VirtueClient = class {
       target: `${this.config.VCERT_RULE_PACKAGE_ID}::vcert_rule::feed`,
       arguments: [
         vIotaCollector,
-        basicPriceResults.IOTA,
+        iotaPriceResult,
         this.transaction.sharedObjectRef(this.config.VCERT_NATIVE_POOL_OBJ),
         this.transaction.sharedObjectRef(this.config.VCERT_METADATA_OBJ)
       ]
@@ -1530,6 +1530,12 @@ var VirtueClient = class {
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       const priceResults = await this.aggregatePrices();
+      const priceResult = priceResults[collateralSymbol];
+      if (!priceResult) {
+        throw new Error(
+          `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`
+        );
+      }
       let updateRequest = this.debtorRequest({
         collateralSymbol,
         depositCoin,
@@ -1545,7 +1551,7 @@ var VirtueClient = class {
       const [collCoin, vusdCoin, response] = this.updatePosition({
         collateralSymbol,
         updateRequest,
-        priceResult: priceResults[collateralSymbol]
+        priceResult
       });
       this.checkResponse({ collateralSymbol, response });
       if (Number(withdrawAmount) > 0) {

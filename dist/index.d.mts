@@ -281,12 +281,12 @@ declare class VirtueClient {
      * SDK error; it takes down the entire PTB, borrow or liquidation included. So
      * the update is devInspected on its own first and only applied if it passes.
      *
-     * When it does not pass — or Hermes is unreachable — the ids are resolved
-     * read-only instead and no update is added. `pyth_rule::feed` then prices from
-     * whatever the `PriceInfoObject` already holds, and its own staleness gate
-     * decides whether that is usable, feeding nothing rather than quoting a stale
-     * price. An undefined entry means even the read-only lookup failed, and the
-     * caller drops the rule entirely for that symbol.
+     * When it does not pass — or Hermes is unreachable — every entry comes back
+     * undefined and the caller drops `pyth_rule::feed` for that symbol. The rule
+     * cannot be pointed at the un-updated `PriceInfoObject` as a consolation:
+     * `pyth_rule::feed` does not abstain on a stale price, it aborts through
+     * `pyth::check_price_is_fresh`, which would take the PTB down exactly the way
+     * a failed update does. Not feeding is the only safe fallback.
      */
     private updatePythPriceFeeds;
     /**
@@ -328,7 +328,7 @@ declare class VirtueClient {
      * @param collateral coin symbol, e.g "IOTA"
      * @return [PriceResult]
      */
-    aggregatePrices(): Promise<Record<COLLATERAL_COIN, TransactionResult>>;
+    aggregatePrices(): Promise<Partial<Record<COLLATERAL_COIN, TransactionResult>>>;
     /**
      * @description Get a request to Mange Position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
