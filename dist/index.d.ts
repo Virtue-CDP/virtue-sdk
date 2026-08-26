@@ -459,7 +459,7 @@ declare class VirtueClient {
     }): Promise<Transaction>;
     /**
      * @description The body of `buildManagePositionTransaction`, split out so the
-     * caller above can roll the shared transaction back if any of it throws.
+     * caller above can run it against a clone and discard that clone if it throws.
      */
     private buildManagePosition;
     /**

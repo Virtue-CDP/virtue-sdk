@@ -1521,18 +1521,20 @@ var VirtueClient = class {
     const { keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
-    this.transaction.setSender(this.sender);
-    const snapshot = this.transaction.serialize();
+    const original = this.transaction;
+    const working = _transactions.Transaction.from(original.serialize());
+    working.setSender(this.sender);
+    this.transaction = working;
     try {
       return await this.buildManagePosition(inputs);
     } catch (error) {
-      this.transaction = _transactions.Transaction.from(snapshot);
+      this.transaction = original;
       throw error;
     }
   }
   /**
    * @description The body of `buildManagePositionTransaction`, split out so the
-   * caller above can roll the shared transaction back if any of it throws.
+   * caller above can run it against a clone and discard that clone if it throws.
    */
   async buildManagePosition(inputs) {
     const {

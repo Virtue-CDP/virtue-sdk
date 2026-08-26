@@ -1353,24 +1353,34 @@ export class VirtueClient {
     const { keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
-    this.transaction.setSender(this.sender);
-    // Coin splits and the oracle commands land on the shared transaction before
-    // this method can know whether the position is buildable at all, so a
-    // failure partway through would leave the caller's transaction holding
-    // commands for a position that was never built. Snapshot first and roll
-    // back, so the method either produces a whole transaction or none of it.
-    const snapshot = this.transaction.serialize();
+    // Coin splits and the oracle commands land on the transaction before this
+    // method can know whether the position is buildable at all, so a failure
+    // partway through must not leave commands for a position that was never
+    // built behind. Restoring afterwards is not enough: `Transaction` exposes no
+    // in-place rollback — `getData()` hands back a snapshot and the builder
+    // itself is a private field — so swapping in a rebuilt object would fix only
+    // this client's pointer and leave a caller that already holds the instance
+    // (the whole point of `keepTransaction`) holding the contaminated one.
+    //
+    // So the caller's instance is never touched at all. All the work goes onto a
+    // clone, which carries over anything already composed, and the clone is only
+    // adopted by succeeding. On failure the original is put back untouched —
+    // same object, same bytes, and the sender it had before this call.
+    const original = this.transaction;
+    const working = Transaction.from(original.serialize());
+    working.setSender(this.sender);
+    this.transaction = working;
     try {
       return await this.buildManagePosition(inputs);
     } catch (error) {
-      this.transaction = Transaction.from(snapshot);
+      this.transaction = original;
       throw error;
     }
   }
 
   /**
    * @description The body of `buildManagePositionTransaction`, split out so the
-   * caller above can roll the shared transaction back if any of it throws.
+   * caller above can run it against a clone and discard that clone if it throws.
    */
   private async buildManagePosition(inputs: {
     collateralSymbol: COLLATERAL_COIN;

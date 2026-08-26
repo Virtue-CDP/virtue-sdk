@@ -156,22 +156,27 @@ describe("oracle source resilience", () => {
   }, 60_000);
 
   /**
-   * The oracle commands are appended to the shared transaction before this can
-   * be known, so the failure has to roll them back rather than leave the
-   * caller's transaction holding commands for a position that was never built.
+   * The oracle commands are appended before this can be known, so the failure
+   * has to leave the caller's own `Transaction` alone — the *same instance* they
+   * are holding, not a replacement handed out afterwards. Re-reading
+   * `getTransaction()` after the failure would observe a swapped-in object and
+   * pass while the held one stayed contaminated, so the reference is captured
+   * up front and asserted on directly.
    */
-  it("leaves the caller's transaction untouched when nothing can price the collateral", async () => {
+  it("leaves the caller's own transaction instance untouched when nothing can price the collateral", async () => {
     const client = new VirtueClient({
-      sender: `0x${"1".repeat(64)}`,
+      sender: `0x${"2".repeat(64)}`,
     });
     client.resetTransaction();
-    // the caller is already composing something of their own
-    const tx = client.getTransaction();
-    tx.moveCall({
+
+    // the caller is already composing something of their own, under their own sender
+    const callerTx = client.getTransaction();
+    callerTx.setSender(`0x${"1".repeat(64)}`);
+    callerTx.moveCall({
       target: "0x2::clock::timestamp_ms",
-      arguments: [tx.object.clock()],
+      arguments: [callerTx.object.clock()],
     });
-    const before = client.getTransaction().getData().commands.length;
+    const before = callerTx.serialize();
 
     breakCrossbar("reject");
     breakHermes(client);
@@ -188,7 +193,12 @@ describe("oracle source resilience", () => {
       }),
     ).rejects.toThrow(/No oracle rule could price/);
 
-    expect(client.getTransaction().getData().commands.length).toBe(before);
+    // the instance the caller holds is still the one the client is using...
+    expect(client.getTransaction()).toBe(callerTx);
+    // ...and is byte-identical to before the call, so the failed build left
+    // behind neither commands nor a rewritten sender.
+    expect(callerTx.serialize()).toBe(before);
+    expect(callerTx.getData().sender).toBe(`0x${"1".repeat(64)}`);
   }, 60_000);
 
   it("does not throw from the SDK when every update path is down", async () => {
