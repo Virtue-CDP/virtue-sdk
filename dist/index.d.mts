@@ -278,6 +278,23 @@ declare class VirtueClient {
      */
     newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
     /**
+     * @description Whether any oracle rule can currently price this collateral —
+     * i.e. whether `aggregatePrices` will return a result for it.
+     *
+     * This exists to be asked *before* anything is written to the transaction.
+     * The answer is only knowable by probing Pyth, and `aggregatePrices` learns it
+     * as a side effect of building; acting on it afterwards would mean unwinding
+     * commands already appended, and `Transaction` cannot be rolled back in place.
+     * Rebuilding a replacement is not a substitute — it changes object identity and
+     * silently drops the instance's build/serialization plugins and intent
+     * resolvers, which a caller composing with `keepTransaction` may depend on.
+     *
+     * Cheap in the common case: a collateral with a Switchboard aggregator is
+     * priceable by configuration alone and costs no network call. Only a
+     * Pyth-only collateral pays for the probe.
+     */
+    private canPriceCollateral;
+    /**
      * @description Add Pyth's price-feed update to the current transaction and
      * return the `PriceInfoObject` ids that `pyth_rule::feed` should read.
      *
@@ -459,7 +476,7 @@ declare class VirtueClient {
     }): Promise<Transaction>;
     /**
      * @description The body of `buildManagePositionTransaction`, split out so the
-     * caller above can run it against a clone and discard that clone if it throws.
+     * entry point above can settle its preconditions before anything is written.
      */
     private buildManagePosition;
     /**

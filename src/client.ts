@@ -710,6 +710,44 @@ export class VirtueClient {
   }
 
   /**
+   * @description Whether any oracle rule can currently price this collateral —
+   * i.e. whether `aggregatePrices` will return a result for it.
+   *
+   * This exists to be asked *before* anything is written to the transaction.
+   * The answer is only knowable by probing Pyth, and `aggregatePrices` learns it
+   * as a side effect of building; acting on it afterwards would mean unwinding
+   * commands already appended, and `Transaction` cannot be rolled back in place.
+   * Rebuilding a replacement is not a substitute — it changes object identity and
+   * silently drops the instance's build/serialization plugins and intent
+   * resolvers, which a caller composing with `keepTransaction` may depend on.
+   *
+   * Cheap in the common case: a collateral with a Switchboard aggregator is
+   * priceable by configuration alone and costs no network call. Only a
+   * Pyth-only collateral pays for the probe.
+   */
+  private async canPriceCollateral(
+    collateralSymbol: COLLATERAL_COIN,
+  ): Promise<boolean> {
+    // stIOTA and vIOTA are derived from the IOTA price, so they live or die with it.
+    const symbol: COLLATERAL_COIN =
+      collateralSymbol === "stIOTA" || collateralSymbol === "vIOTA"
+        ? "IOTA"
+        : collateralSymbol;
+
+    const switchboardFeeds =
+      !!this.config.SWITCHBOARD_AGGREGATORS?.[symbol] &&
+      !!this.config.SWITCHBOARD_RULE_PACKAGE_ID &&
+      !!this.config.SWITCHBOARD_RULE_CONFIG_OBJ;
+    if (switchboardFeeds) return true;
+
+    const pythPriceId = this.config.VAULT_MAP[symbol].pythPriceId;
+    if (!pythPriceId) return false;
+    return (
+      (await this.updatePythPriceFeeds([pythPriceId], true))[0] !== undefined
+    );
+  }
+
+  /**
    * @description Add Pyth's price-feed update to the current transaction and
    * return the `PriceInfoObject` ids that `pyth_rule::feed` should read.
    *
@@ -730,6 +768,7 @@ export class VirtueClient {
    */
   private async updatePythPriceFeeds(
     pythPriceIds: string[],
+    probeOnly = false,
   ): Promise<(string | undefined)[]> {
     const noneFed = () => pythPriceIds.map(() => undefined);
 
@@ -738,7 +777,7 @@ export class VirtueClient {
         await this.pythConnection.getPriceFeedsUpdateData(pythPriceIds);
 
       const probe = new Transaction();
-      await this.pythClient.updatePriceFeeds(
+      const probeIds = await this.pythClient.updatePriceFeeds(
         probe as any,
         updateData,
         pythPriceIds,
@@ -748,6 +787,10 @@ export class VirtueClient {
         transactionBlock: probe,
       });
       if (inspect.effects.status.status !== "success") return noneFed();
+
+      // `canPriceCollateral` asks this question before the caller's transaction
+      // has been touched, so answering it must not write to that transaction.
+      if (probeOnly) return probeIds;
 
       return await this.pythClient.updatePriceFeeds(
         this.transaction as any,
@@ -1350,37 +1393,31 @@ export class VirtueClient {
     recipient?: string;
     keepTransaction?: boolean;
   }): Promise<Transaction> {
-    const { keepTransaction } = inputs;
+    const { collateralSymbol, borrowAmount, withdrawAmount, keepTransaction } =
+      inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
-    // Coin splits and the oracle commands land on the transaction before this
-    // method can know whether the position is buildable at all, so a failure
-    // partway through must not leave commands for a position that was never
-    // built behind. Restoring afterwards is not enough: `Transaction` exposes no
-    // in-place rollback — `getData()` hands back a snapshot and the builder
-    // itself is a private field — so swapping in a rebuilt object would fix only
-    // this client's pointer and leave a caller that already holds the instance
-    // (the whole point of `keepTransaction`) holding the contaminated one.
-    //
-    // So the caller's instance is never touched at all. All the work goes onto a
-    // clone, which carries over anything already composed, and the clone is only
-    // adopted by succeeding. On failure the original is put back untouched —
-    // same object, same bytes, and the sender it had before this call.
-    const original = this.transaction;
-    const working = Transaction.from(original.serialize());
-    working.setSender(this.sender);
-    this.transaction = working;
-    try {
-      return await this.buildManagePosition(inputs);
-    } catch (error) {
-      this.transaction = original;
-      throw error;
+    // Coin splits and the oracle commands land on the transaction before it can
+    // be known whether the position is buildable at all, and a `Transaction`
+    // cannot be rolled back afterwards: `getData()` returns a snapshot, the
+    // builder behind it is private, and swapping in a rebuilt object would
+    // change the identity the caller is composing against and drop that
+    // instance's plugins and intent resolvers. So the one question that can fail
+    // the build is asked up front, while the transaction is still untouched.
+    if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
+      if (!(await this.canPriceCollateral(collateralSymbol))) {
+        throw new Error(
+          `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`,
+        );
+      }
     }
+    this.transaction.setSender(this.sender);
+    return await this.buildManagePosition(inputs);
   }
 
   /**
    * @description The body of `buildManagePositionTransaction`, split out so the
-   * caller above can run it against a clone and discard that clone if it throws.
+   * entry point above can settle its preconditions before anything is written.
    */
   private async buildManagePosition(inputs: {
     collateralSymbol: COLLATERAL_COIN;
@@ -1409,8 +1446,11 @@ export class VirtueClient {
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       const priceResults = await this.aggregatePrices();
-      // `updatePosition` turns a missing price into `option::none`, so without
-      // this the position would be built as though no price check were needed.
+      // `canPriceCollateral` has already settled this before anything was
+      // written, so reaching here means the price went away in between. Kept as
+      // a backstop because `updatePosition` turns a missing price into
+      // `option::none`, and building a borrow as though no price check were
+      // needed is far worse than throwing on a partially built transaction.
       const priceResult = priceResults[collateralSymbol];
       if (!priceResult) {
         throw new Error(

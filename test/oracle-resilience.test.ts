@@ -201,6 +201,54 @@ describe("oracle source resilience", () => {
     expect(callerTx.getData().sender).toBe(`0x${"1".repeat(64)}`);
   }, 60_000);
 
+  /**
+   * The mirror of the case above: composing with `keepTransaction: true` means
+   * the caller keeps building on the instance they already hold, so a *success*
+   * must land on that same instance too. Rebuilding a replacement would leave
+   * the caller holding a transaction missing the position entirely — and would
+   * silently drop the instance's build plugins, which is invisible until
+   * whatever they installed fails to run.
+   */
+  it("builds onto the caller's own transaction instance, plugins intact", async () => {
+    const client = new VirtueClient({
+      sender:
+        "0x08e00db614b1024014b33f86e9d0baf76a48649b317d1517536502c521d20322",
+    });
+    client.resetTransaction();
+
+    const callerTx = client.getTransaction();
+    callerTx.moveCall({
+      target: "0x2::clock::timestamp_ms",
+      arguments: [callerTx.object.clock()],
+    });
+    let pluginRuns = 0;
+    callerTx.addBuildPlugin(async (_data, _options, next) => {
+      pluginRuns += 1;
+      await next();
+    });
+
+    // A zero-value deposit composes without needing a price at all, so this
+    // exercises the success path rather than the oracle.
+    const returned = await client.buildManagePositionTransaction({
+      collateralSymbol: "IOTA",
+      depositAmount: "0",
+      borrowAmount: "0",
+      repaymentAmount: "0",
+      withdrawAmount: "0",
+      keepTransaction: true,
+    });
+
+    // Same object throughout — what the caller holds, what the client uses, and
+    // what came back.
+    expect(returned).toBe(callerTx);
+    expect(client.getTransaction()).toBe(callerTx);
+    // The position landed on it, alongside the command the caller had already put there.
+    expect(callerTx.getData().commands.length).toBeGreaterThan(1);
+    // And the caller's own build plugin still runs.
+    await callerTx.build({ client: client.getIotaClient() });
+    expect(pluginRuns).toBe(1);
+  }, 60_000);
+
   it("does not throw from the SDK when every update path is down", async () => {
     breakCrossbar("reject");
     const client = new VirtueClient({});
