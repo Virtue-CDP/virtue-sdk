@@ -34,6 +34,9 @@ import { bcs } from "@iota/iota-sdk/bcs";
 import { normalizeIotaAddress, normalizeStructTag } from "@iota/iota-sdk/utils";
 import { Keypair } from "@iota/iota-sdk/cryptography";
 
+/** Upper bound on the crossbar round-trip, so a hung endpoint can't stall a price read. */
+const SWITCHBOARD_CRANK_TIMEOUT_MS = 5_000;
+
 const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
   const coin = Object.keys(coinTypes).find(
     (key) => coinTypes[key as COIN] === coinType,
@@ -696,7 +699,6 @@ export class VirtueClient {
     });
   }
 
-
   /**
    * @description Fetch signed Switchboard responses and add the ones that will
    * actually validate on chain to the current transaction.
@@ -717,10 +719,18 @@ export class VirtueClient {
    *   Each response is therefore devInspected on its own first and only the
    *   survivors are added.
    *
-   * Returns the number of submissions added. Zero means every oracle failed, in
-   * which case nothing is added and `switchboard_rule::feed` falls back to
-   * whatever result is already on chain — which its freshness gate will reject if
-   * it is stale, making the rule abstain rather than quoting a stale price.
+   * Returns the number of submissions added, and **never throws**: a crossbar
+   * outage, a slow endpoint, a malformed response, or an RPC failure all resolve
+   * to `0`. Switchboard is one rule among several, so raising here would take
+   * down price reads — and every position build that depends on them — that the
+   * other rules could have served on their own. Contributing nothing is the
+   * correct failure mode: the decision then belongs on chain, where `aggregate`
+   * aborts by itself if no rule supplied a usable price.
+   *
+   * Zero also covers the case where every oracle simply failed validation, in
+   * which case `switchboard_rule::feed` falls back to whatever result is already
+   * on chain — which its freshness gate will reject if it is stale, making the
+   * rule abstain rather than quoting a stale price.
    */
   private async crankSwitchboard(
     aggregatorId: string,
@@ -729,81 +739,86 @@ export class VirtueClient {
     const pkg = this.config.SWITCHBOARD_PACKAGE_ID;
     if (!pkg) return 0;
 
-    const res = await fetch(
-      `https://crossbar.switchboard.xyz/updates/iota/mainnet/${aggregatorId}?numSignatures=${numSignatures}`,
-    );
-    if (!res.ok) return 0;
-    const body = (await res.json()) as {
-      responses?: {
-        results?: {
-          successValue: string;
-          isNegative: boolean;
-          timestamp: number;
-          signature: string;
-          oracleId: string;
-        }[];
-      }[];
-    };
-    const results = (body.responses ?? [])
-      .flatMap((r) => r.results ?? [])
-      // `"00"` is crossbar's placeholder for an oracle that did not sign.
-      .filter((r) => r.signature && r.signature !== "00" && r.successValue);
-    if (results.length === 0) return 0;
-
-    const aggObj = await this.iotaClient.getObject({
-      id: aggregatorId,
-      options: { showContent: true },
-    });
-    const queue = (aggObj.data?.content as any)?.fields?.queue as string;
-    if (!queue) return 0;
-
-    const submit = (tx: Transaction, r: (typeof results)[number]) => {
-      const signature = Uint8Array.from(
-        Buffer.from(r.signature.replace(/^0x/, ""), "hex"),
+    try {
+      const res = await fetch(
+        `https://crossbar.switchboard.xyz/updates/iota/mainnet/${aggregatorId}?numSignatures=${numSignatures}`,
+        { signal: AbortSignal.timeout(SWITCHBOARD_CRANK_TIMEOUT_MS) },
       );
-      if (signature.length !== 65) return false;
-      // The queue fee is 0, but `run` still asserts the coin type it accepts.
-      const [fee] = tx.splitCoins(tx.gas, [0]);
-      tx.moveCall({
-        target: `${pkg}::aggregator_submit_result_action::run`,
-        typeArguments: ["0x2::iota::IOTA"],
-        arguments: [
-          tx.object(aggregatorId),
-          tx.object(queue),
-          tx.pure.u128(BigInt(r.successValue.replace(/^-/, ""))),
-          tx.pure.bool(r.isNegative || r.successValue.startsWith("-")),
-          tx.pure.u64(BigInt(r.timestamp)),
-          tx.object(r.oracleId),
-          tx.pure.vector("u8", signature),
-          tx.object.clock(),
-          fee!,
-        ],
+      if (!res.ok) return 0;
+      const body = (await res.json()) as {
+        responses?: {
+          results?: {
+            successValue: string;
+            isNegative: boolean;
+            timestamp: number;
+            signature: string;
+            oracleId: string;
+          }[];
+        }[];
+      };
+      const results = (body.responses ?? [])
+        .flatMap((r) => r.results ?? [])
+        // `"00"` is crossbar's placeholder for an oracle that did not sign.
+        .filter((r) => r.signature && r.signature !== "00" && r.successValue);
+      if (results.length === 0) return 0;
+
+      const aggObj = await this.iotaClient.getObject({
+        id: aggregatorId,
+        options: { showContent: true },
       });
-      return true;
-    };
+      const queue = (aggObj.data?.content as any)?.fields?.queue as string;
+      if (!queue) return 0;
 
-    const sender = DUMMY_ADDRESS;
-    const verdicts = await Promise.all(
-      results.map(async (r) => {
-        const probe = new Transaction();
-        if (!submit(probe, r)) return undefined;
-        try {
-          const inspect = await this.iotaClient.devInspectTransactionBlock({
-            sender,
-            transactionBlock: probe,
-          });
-          return inspect.effects.status.status === "success" ? r : undefined;
-        } catch {
-          return undefined;
-        }
-      }),
-    );
+      const submit = (tx: Transaction, r: (typeof results)[number]) => {
+        const signature = Uint8Array.from(
+          Buffer.from(r.signature.replace(/^0x/, ""), "hex"),
+        );
+        if (signature.length !== 65) return false;
+        // The queue fee is 0, but `run` still asserts the coin type it accepts.
+        const [fee] = tx.splitCoins(tx.gas, [0]);
+        tx.moveCall({
+          target: `${pkg}::aggregator_submit_result_action::run`,
+          typeArguments: ["0x2::iota::IOTA"],
+          arguments: [
+            tx.object(aggregatorId),
+            tx.object(queue),
+            tx.pure.u128(BigInt(r.successValue.replace(/^-/, ""))),
+            tx.pure.bool(r.isNegative || r.successValue.startsWith("-")),
+            tx.pure.u64(BigInt(r.timestamp)),
+            tx.object(r.oracleId),
+            tx.pure.vector("u8", signature),
+            tx.object.clock(),
+            fee!,
+          ],
+        });
+        return true;
+      };
 
-    let added = 0;
-    for (const r of verdicts) {
-      if (r && submit(this.transaction, r)) added++;
+      const sender = DUMMY_ADDRESS;
+      const verdicts = await Promise.all(
+        results.map(async (r) => {
+          try {
+            const probe = new Transaction();
+            if (!submit(probe, r)) return undefined;
+            const inspect = await this.iotaClient.devInspectTransactionBlock({
+              sender,
+              transactionBlock: probe,
+            });
+            return inspect.effects.status.status === "success" ? r : undefined;
+          } catch {
+            return undefined;
+          }
+        }),
+      );
+
+      let added = 0;
+      for (const r of verdicts) {
+        if (r && submit(this.transaction, r)) added++;
+      }
+      return added;
+    } catch {
+      return 0;
     }
-    return added;
   }
 
   /**

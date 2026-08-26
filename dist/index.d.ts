@@ -135,6 +135,16 @@ type ConfigType = {
     VCERT_RULE_PACKAGE_ID: string;
     VCERT_NATIVE_POOL_OBJ: SharedObjectRef;
     VCERT_METADATA_OBJ: SharedObjectRef;
+    /**
+     * Switchboard On-Demand. Optional: where these are absent `aggregatePrices`
+     * skips the crank and the `switchboard_rule::feed` call entirely, which is what
+     * testnet does — there is no deployment there.
+     */
+    SWITCHBOARD_PACKAGE_ID?: string;
+    SWITCHBOARD_RULE_PACKAGE_ID?: string;
+    SWITCHBOARD_RULE_CONFIG_OBJ?: SharedObjectRef;
+    /** Coin symbol -> the one `Aggregator` object `feed<T>` accepts for it. */
+    SWITCHBOARD_AGGREGATORS?: Partial<Record<COLLATERAL_COIN, string>>;
     POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
     POINT_MANAGER_OBJ: SharedObjectRef;
     STABILITY_POOL_TABLE_ID: string;
@@ -259,6 +269,40 @@ declare class VirtueClient {
      * @return PriceCollector
      */
     newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
+    /**
+     * @description Fetch signed Switchboard responses and add the ones that will
+     * actually validate on chain to the current transaction.
+     *
+     * Switchboard is on-demand, not push: `Aggregator.current_result` only changes
+     * when someone submits a signed oracle response. Left alone the IOTA mainnet
+     * feed sat 330 days stale, so the crank belongs in the same PTB as the read.
+     *
+     * Two things make this awkward, both handled here:
+     *
+     * - Most oracles on the IOTA queues are broken — their signature no longer
+     *   recovers to the `secp256k1_key` in their on-chain `Oracle` object, so
+     *   `aggregator_submit_result_action::validate` aborts. Crossbar hands out one
+     *   at random per request, so a plain crank succeeds about a quarter of the
+     *   time. `numSignatures` asks for the whole set instead.
+     * - A PTB is all-or-nothing, so one broken oracle would take the entire price
+     *   read — and whatever borrow or liquidation is bundled with it — down too.
+     *   Each response is therefore devInspected on its own first and only the
+     *   survivors are added.
+     *
+     * Returns the number of submissions added, and **never throws**: a crossbar
+     * outage, a slow endpoint, a malformed response, or an RPC failure all resolve
+     * to `0`. Switchboard is one rule among several, so raising here would take
+     * down price reads — and every position build that depends on them — that the
+     * other rules could have served on their own. Contributing nothing is the
+     * correct failure mode: the decision then belongs on chain, where `aggregate`
+     * aborts by itself if no rule supplied a usable price.
+     *
+     * Zero also covers the case where every oracle simply failed validation, in
+     * which case `switchboard_rule::feed` falls back to whatever result is already
+     * on chain — which its freshness gate will reject if it is stale, making the
+     * rule abstain rather than quoting a stale price.
+     */
+    private crankSwitchboard;
     /**
      * @description Get a price result
      * @param collateral coin symbol, e.g "IOTA"

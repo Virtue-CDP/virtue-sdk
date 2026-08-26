@@ -95,6 +95,16 @@ var CONFIG = {
       initialSharedVersion: 427133775,
       mutable: false
     },
+    SWITCHBOARD_PACKAGE_ID: "0x8650249db8ffcffe8eb08b0696a8cb71e325f2afb9abc646f45344077b073ba1",
+    SWITCHBOARD_RULE_PACKAGE_ID: "0x39fb7adf0abd75b31868e17706b8600cc943bc27422fb582f6e14282029cd5f0",
+    SWITCHBOARD_RULE_CONFIG_OBJ: {
+      objectId: "0xa0c7b527f35476c51938d0ffd144b83cd7ee5091f516327228391b77e03afa3e",
+      initialSharedVersion: 759082916,
+      mutable: false
+    },
+    SWITCHBOARD_AGGREGATORS: {
+      IOTA: "0x7c16ffdac553a4816db57e5e2cfbba8245337f2983b4ffb4dd944493a530c556"
+    },
     POINT_GLOBAL_CONFIG_OBJ: {
       objectId: "0x86f95e88bcc50edbd930153079db969e92f050c887d7d4b4642a08cbb04d8787",
       initialSharedVersion: 126182186,
@@ -445,6 +455,7 @@ var parseVaultObject = (coinSymbol, fields) => {
 var _pythiotajs = require('@pythnetwork/pyth-iota-js');
 var _bcs = require('@iota/iota-sdk/bcs');
 
+var SWITCHBOARD_CRANK_TIMEOUT_MS = 5e3;
 var getCoinSymbol2 = (coinType, coinTypes) => {
   const coin = Object.keys(coinTypes).find(
     (key) => coinTypes[key] === coinType
@@ -984,6 +995,105 @@ var VirtueClient = class {
     });
   }
   /**
+   * @description Fetch signed Switchboard responses and add the ones that will
+   * actually validate on chain to the current transaction.
+   *
+   * Switchboard is on-demand, not push: `Aggregator.current_result` only changes
+   * when someone submits a signed oracle response. Left alone the IOTA mainnet
+   * feed sat 330 days stale, so the crank belongs in the same PTB as the read.
+   *
+   * Two things make this awkward, both handled here:
+   *
+   * - Most oracles on the IOTA queues are broken — their signature no longer
+   *   recovers to the `secp256k1_key` in their on-chain `Oracle` object, so
+   *   `aggregator_submit_result_action::validate` aborts. Crossbar hands out one
+   *   at random per request, so a plain crank succeeds about a quarter of the
+   *   time. `numSignatures` asks for the whole set instead.
+   * - A PTB is all-or-nothing, so one broken oracle would take the entire price
+   *   read — and whatever borrow or liquidation is bundled with it — down too.
+   *   Each response is therefore devInspected on its own first and only the
+   *   survivors are added.
+   *
+   * Returns the number of submissions added, and **never throws**: a crossbar
+   * outage, a slow endpoint, a malformed response, or an RPC failure all resolve
+   * to `0`. Switchboard is one rule among several, so raising here would take
+   * down price reads — and every position build that depends on them — that the
+   * other rules could have served on their own. Contributing nothing is the
+   * correct failure mode: the decision then belongs on chain, where `aggregate`
+   * aborts by itself if no rule supplied a usable price.
+   *
+   * Zero also covers the case where every oracle simply failed validation, in
+   * which case `switchboard_rule::feed` falls back to whatever result is already
+   * on chain — which its freshness gate will reject if it is stale, making the
+   * rule abstain rather than quoting a stale price.
+   */
+  async crankSwitchboard(aggregatorId, numSignatures = 8) {
+    const pkg = this.config.SWITCHBOARD_PACKAGE_ID;
+    if (!pkg) return 0;
+    try {
+      const res = await fetch(
+        `https://crossbar.switchboard.xyz/updates/iota/mainnet/${aggregatorId}?numSignatures=${numSignatures}`,
+        { signal: AbortSignal.timeout(SWITCHBOARD_CRANK_TIMEOUT_MS) }
+      );
+      if (!res.ok) return 0;
+      const body = await res.json();
+      const results = (_nullishCoalesce(body.responses, () => ( []))).flatMap((r) => _nullishCoalesce(r.results, () => ( []))).filter((r) => r.signature && r.signature !== "00" && r.successValue);
+      if (results.length === 0) return 0;
+      const aggObj = await this.iotaClient.getObject({
+        id: aggregatorId,
+        options: { showContent: true }
+      });
+      const queue = _optionalChain([aggObj, 'access', _26 => _26.data, 'optionalAccess', _27 => _27.content, 'optionalAccess', _28 => _28.fields, 'optionalAccess', _29 => _29.queue]);
+      if (!queue) return 0;
+      const submit = (tx, r) => {
+        const signature = Uint8Array.from(
+          Buffer.from(r.signature.replace(/^0x/, ""), "hex")
+        );
+        if (signature.length !== 65) return false;
+        const [fee] = tx.splitCoins(tx.gas, [0]);
+        tx.moveCall({
+          target: `${pkg}::aggregator_submit_result_action::run`,
+          typeArguments: ["0x2::iota::IOTA"],
+          arguments: [
+            tx.object(aggregatorId),
+            tx.object(queue),
+            tx.pure.u128(BigInt(r.successValue.replace(/^-/, ""))),
+            tx.pure.bool(r.isNegative || r.successValue.startsWith("-")),
+            tx.pure.u64(BigInt(r.timestamp)),
+            tx.object(r.oracleId),
+            tx.pure.vector("u8", signature),
+            tx.object.clock(),
+            fee
+          ]
+        });
+        return true;
+      };
+      const sender = DUMMY_ADDRESS;
+      const verdicts = await Promise.all(
+        results.map(async (r) => {
+          try {
+            const probe = new (0, _transactions.Transaction)();
+            if (!submit(probe, r)) return void 0;
+            const inspect = await this.iotaClient.devInspectTransactionBlock({
+              sender,
+              transactionBlock: probe
+            });
+            return inspect.effects.status.status === "success" ? r : void 0;
+          } catch (e2) {
+            return void 0;
+          }
+        })
+      );
+      let added = 0;
+      for (const r of verdicts) {
+        if (r && submit(this.transaction, r)) added++;
+      }
+      return added;
+    } catch (e3) {
+      return 0;
+    }
+  }
+  /**
    * @description Get a price result
    * @param collateral coin symbol, e.g "IOTA"
    * @return [PriceResult]
@@ -1003,6 +1113,11 @@ var VirtueClient = class {
       updateData,
       pythPriceIds
     );
+    const switchboardAggregators = _nullishCoalesce(this.config.SWITCHBOARD_AGGREGATORS, () => ( {}));
+    for (const symbol of basicSymbol) {
+      const aggregatorId = switchboardAggregators[symbol];
+      if (aggregatorId) await this.crankSwitchboard(aggregatorId);
+    }
     const basicPriceResults = basicSymbol.reduce(
       (result, symbol, idx) => {
         const coinType = this.config.COIN_TYPES[symbol];
@@ -1018,6 +1133,21 @@ var VirtueClient = class {
             this.transaction.object(priceInfoObjIds[idx])
           ]
         });
+        const switchboardAggregatorId = switchboardAggregators[symbol];
+        if (switchboardAggregatorId && this.config.SWITCHBOARD_RULE_PACKAGE_ID && this.config.SWITCHBOARD_RULE_CONFIG_OBJ) {
+          this.transaction.moveCall({
+            target: `${this.config.SWITCHBOARD_RULE_PACKAGE_ID}::switchboard_rule::feed`,
+            typeArguments: [coinType],
+            arguments: [
+              collector,
+              this.transaction.sharedObjectRef(
+                this.config.SWITCHBOARD_RULE_CONFIG_OBJ
+              ),
+              this.transaction.object.clock(),
+              this.transaction.object(switchboardAggregatorId)
+            ]
+          });
+        }
         const priceResult = this.transaction.moveCall({
           target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
           typeArguments: [coinType],
