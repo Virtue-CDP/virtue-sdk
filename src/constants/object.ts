@@ -30,11 +30,6 @@ export type ConfigType = {
   VAULT_REWARDER_REGISTRY_OBJ: SharedObjectRef;
   POOL_REWARDER_REGISTRY_OBJ: SharedObjectRef;
 
-  PYTH_STATE_ID: string;
-  WORMHOLE_STATE_ID: string;
-  PYTH_RULE_PACKAGE_ID: string;
-  PYTH_RULE_CONFIG_OBJ: SharedObjectRef;
-
   CERT_RULE_PACKAGE_ID: string;
   CERT_NATIVE_POOL_OBJ: SharedObjectRef;
   CERT_METADATA_OBJ: SharedObjectRef;
@@ -70,7 +65,6 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA:
         "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
-      iBTC: "0x387c459c5c947aac7404e53ba69541c5d64f3cf96f3bc515e7f8a067fb725b54::ibtc::IBTC",
       vIOTA:
         "0xe4abf8b6183c106282addbfb8483a043e1a60f1fd3dd91fb727fa284306a27fd::cert::CERT",
     },
@@ -134,19 +128,6 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       initialSharedVersion: 196734342,
       mutable: false,
     },
-    PYTH_STATE_ID:
-      "0x6bc33855c7675e006f55609f61eebb1c8a104d8973a698ee9efd3127c210b37f",
-    WORMHOLE_STATE_ID:
-      "0xd43b448afc9dd01deb18273ec39d8f27ddd4dd46b0922383874331771b70df73",
-    PYTH_RULE_PACKAGE_ID:
-      "0xed5a8dac2ca41ae9bdc1c7f778b0949d3e26c18c51ed284c4cfa4030d0bb64c2",
-    PYTH_RULE_CONFIG_OBJ: {
-      objectId:
-        "0xbcc4f6e3ca3d4a83eac39282ab7d1cb086924c58bef825d69c33b00fea1105b8",
-      initialSharedVersion: 22329882,
-      mutable: false,
-    },
-
     CERT_RULE_PACKAGE_ID:
       "0x01edb9afe0663b8762d2e0a18923df8bee98d28f3a60ac56ff67a27bbf53a7ac",
     CERT_NATIVE_POOL_OBJ: {
@@ -229,8 +210,6 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           initialSharedVersion: 22329895,
           mutable: true,
         },
-        pythPriceId:
-          "0xc7b72e5d860034288c9335d4d325da4272fe50c92ab72249d58f6cbba30e4c44",
       },
       stIOTA: {
         priceAggregater: {
@@ -255,22 +234,6 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           },
         ],
       },
-      iBTC: {
-        priceAggregater: {
-          objectId:
-            "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
-          initialSharedVersion: 172291113,
-          mutable: false,
-        },
-        vault: {
-          objectId:
-            "0xcc094d9e3b491b0c943bb18daf07a49bd951f34688f9610d90982de06fc0c5c9",
-          initialSharedVersion: 172291112,
-          mutable: true,
-        },
-        pythPriceId:
-          "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
-      },
       vIOTA: {
         priceAggregater: {
           objectId:
@@ -293,7 +256,6 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA:
         "0x14f9e69c0076955d5a056260c9667edab184650dba9919f168a37030dd956dc6::cert::CERT",
-      iBTC: "",
       vIOTA: "",
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID:
@@ -347,18 +309,6 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       mutable: false,
     },
 
-    PYTH_STATE_ID:
-      "0x68dda579251917b3db28e35c4df495c6e664ccc085ede867a9b773c8ebedc2c1",
-    WORMHOLE_STATE_ID:
-      "0x8bc490f69520a97ca1b3de864c96aa2265a0cf5d90f5f3f016b2eddf0cf2af2b",
-    PYTH_RULE_PACKAGE_ID:
-      "0xa4cbdbf0f287b616284aafb75bbc6192fcb8362a4c3cc57a4df41a865e6ca338",
-    PYTH_RULE_CONFIG_OBJ: {
-      objectId:
-        "0x1258041fbe82bd343456101402a51ce3146157297f2f5273621a1d32c9098c36",
-      initialSharedVersion: 265495170,
-      mutable: false,
-    },
     CERT_RULE_PACKAGE_ID:
       "0x5bf6e3d810d19ceb4fa03d750e8e2785357cfddb58089cd78acf9a309b9b72ec",
     CERT_NATIVE_POOL_OBJ: {
@@ -411,8 +361,6 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           initialSharedVersion: 265495180,
           mutable: true,
         },
-        pythPriceId:
-          "0xc7b72e5d860034288c9335d4d325da4272fe50c92ab72249d58f6cbba30e4c44",
       },
       stIOTA: {
         priceAggregater: {
@@ -428,22 +376,6 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           mutable: true,
         },
         rewarders: [],
-      },
-      iBTC: {
-        priceAggregater: {
-          objectId:
-            "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
-          initialSharedVersion: 172291113,
-          mutable: false,
-        },
-        vault: {
-          objectId:
-            "0xcc094d9e3b491b0c943bb18daf07a49bd951f34688f9610d90982de06fc0c5c9",
-          initialSharedVersion: 172291112,
-          mutable: true,
-        },
-        pythPriceId:
-          "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
       },
       vIOTA: {
         priceAggregater: {

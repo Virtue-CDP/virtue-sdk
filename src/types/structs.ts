@@ -45,7 +45,6 @@ export type VaultObjectInfo = {
   // symbol: COIN;
   priceAggregater: SharedObjectRef;
   vault: SharedObjectRef;
-  pythPriceId?: string;
   rewarders?: Rewarder[];
 };
 

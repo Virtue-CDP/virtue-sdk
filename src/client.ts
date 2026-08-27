@@ -26,10 +26,6 @@ import {
   PoolPositionsResponse,
 } from "@/types";
 import { getObjectFields, parseVaultObject } from "@/utils";
-import {
-  IotaPriceServiceConnection,
-  IotaPythClient,
-} from "@pythnetwork/pyth-iota-js";
 import { bcs } from "@iota/iota-sdk/bcs";
 import {
   fromHEX,
@@ -42,7 +38,7 @@ import { Keypair } from "@iota/iota-sdk/cryptography";
 const SWITCHBOARD_CRANK_TIMEOUT_MS = 5_000;
 
 /** The collaterals priced directly by an oracle; the rest are derived from these. */
-const BASIC_PRICE_SYMBOLS: COLLATERAL_COIN[] = ["IOTA", "iBTC"];
+const BASIC_PRICE_SYMBOLS: COLLATERAL_COIN[] = ["IOTA"];
 
 /** One signed Switchboard response, as crossbar hands it over. */
 type SwitchboardResponse = {
@@ -60,19 +56,12 @@ type PreparedSwitchboard = {
   results: SwitchboardResponse[];
 };
 
-/** Update data already proven to verify on chain, kept so it is never refetched. */
-type PreparedPythUpdate = {
-  priceIds: string[];
-  updateData: Buffer[];
-};
-
 /**
  * Everything the oracle rules need from the network, resolved before a single
  * command is written. Applying this cannot fail, which is what lets a position
  * build be abandoned without having touched the caller's transaction.
  */
 type PreparedOracleUpdates = {
-  pyth: PreparedPythUpdate | null;
   switchboard: Partial<Record<COLLATERAL_COIN, PreparedSwitchboard>>;
 };
 
@@ -114,8 +103,6 @@ export class VirtueClient {
    */
   private rpcEndpoint: string;
   private iotaClient: IotaClient;
-  private pythConnection: IotaPriceServiceConnection;
-  private pythClient: IotaPythClient;
   public transaction: Transaction;
   public sender: string;
   public config: ConfigType;
@@ -130,15 +117,6 @@ export class VirtueClient {
     this.rpcEndpoint = rpcUrl ?? getFullnodeUrl(network ?? "mainnet");
     this.sender = sender ? normalizeIotaAddress(sender) : DUMMY_ADDRESS;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
-    this.pythConnection = new IotaPriceServiceConnection(
-      "https://hermes.pyth.network",
-    );
-    /* eslint-disable  @typescript-eslint/no-explicit-any */
-    this.pythClient = new IotaPythClient(
-      this.iotaClient as any,
-      this.config.PYTH_STATE_ID,
-      this.config.WORMHOLE_STATE_ID,
-    );
     this.transaction = new Transaction();
   }
 
@@ -149,20 +127,6 @@ export class VirtueClient {
    */
   getIotaClient(): IotaClient {
     return this.iotaClient;
-  }
-
-  /**
-   * @description Get this.pythConnection
-   */
-  getPythConnection(): IotaPriceServiceConnection {
-    return this.pythConnection;
-  }
-
-  /**
-   * @description Get this.pythClient
-   */
-  getPythClient(): IotaPythClient {
-    return this.pythClient;
   }
 
   getAllCollateralSymbol(): COLLATERAL_COIN[] {
@@ -177,10 +141,9 @@ export class VirtueClient {
    *
    * A symbol is **absent** from the result when no oracle rule could price it —
    * `aggregatePrices` leaves such a symbol out of the transaction, so it emits
-   * no event. iBTC is the live example: it is fed by Pyth alone, so it drops out
-   * whenever the Pyth update cannot be applied, while IOTA carries on through
-   * Switchboard. The return type is `Partial` to say so; treat a missing entry
-   * as "no price available right now", never as zero.
+   * no event, and the derived symbols go with it since they are computed from
+   * the IOTA price. The return type is `Partial` to say so; treat a missing
+   * entry as "no price available right now", never as zero.
    */
   async getCollateralPrices(): Promise<
     Partial<Record<COLLATERAL_COIN, number>>
@@ -188,13 +151,22 @@ export class VirtueClient {
     this.resetTransaction();
     await this.aggregatePrices();
     this.transaction.setSender(DUMMY_ADDRESS);
-    const dryrunRes = await this.dryrunTransaction();
+    // Dev-inspected rather than dry-run. Building for a dry run asks the node to
+    // determine a gas budget, which is itself an execution — so an aggregation
+    // that aborts because nothing could price the symbol comes back as a thrown
+    // budgeting error rather than as an absent price. Dev-inspection needs no
+    // gas and reports the abort as a failed status with no events, which the
+    // reduce below then reads as "no price", the contract this method promises.
+    const inspectRes = await this.iotaClient.devInspectTransactionBlock({
+      sender: DUMMY_ADDRESS,
+      transactionBlock: this.transaction,
+    });
     this.resetTransaction();
     const pricePrecision = 10 ** 9;
     return this.getAllCollateralSymbol().reduce(
       (result, coinSymbol) => {
         const coinType = this.config.COIN_TYPES[coinSymbol];
-        const priceEvent = dryrunRes.events.findLast((e) =>
+        const priceEvent = (inspectRes.events ?? []).findLast((e) =>
           normalizeStructTag(e.type).includes(normalizeStructTag(coinType)),
         );
         if (priceEvent) {
@@ -741,8 +713,11 @@ export class VirtueClient {
    * @param collateral coin symbol, e.g "IOTA"
    * @return PriceCollector
    */
-  newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionArgument {
-    return this.transaction.moveCall({
+  newPriceCollector(
+    collateralSymbol: COLLATERAL_COIN,
+    tx: Transaction = this.transaction,
+  ): TransactionArgument {
+    return tx.moveCall({
       target: `${this.config.ORACLE_PACKAGE_ID}::collector::new`,
       typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
     });
@@ -766,41 +741,20 @@ export class VirtueClient {
    * been written to — and it would pay for the same work twice.
    */
   private async prepareOracleUpdates(
-    opts: { forDeferredSigning?: boolean } = {},
     basicSymbols: COLLATERAL_COIN[] = BASIC_PRICE_SYMBOLS,
   ): Promise<PreparedOracleUpdates> {
-    const pythPriceIds = basicSymbols.map(
-      (symbol) => this.config.VAULT_MAP[symbol].pythPriceId ?? "",
-    );
     const switchboardAggregators = this.config.SWITCHBOARD_AGGREGATORS ?? {};
-
-    const pyth = await this.preparePythUpdate(pythPriceIds);
-
-    // A Switchboard submission carries the timestamp the oracle signed at, and
-    // the queue only accepts it for `max_staleness_seconds` afterwards — 150s on
-    // the configured queue. That is harmless in a transaction dry-run straight
-    // away, but one handed to a wallet may be approved long after the window has
-    // closed, and the submission runs *before* the aggregation, so it would
-    // abort the whole PTB and take a perfectly good Pyth price down with it.
-    //
-    // So where Pyth can already carry the price, the crank is left out of a
-    // transaction destined for signing. The rule itself still reads the
-    // aggregator and abstains if that is stale, so nothing is lost but the
-    // second opinion — and nothing can expire.
-    const skipCrank = !!opts.forDeferredSigning && !!pyth;
 
     const switchboard: Partial<Record<COLLATERAL_COIN, PreparedSwitchboard>> =
       {};
-    if (!skipCrank) {
-      for (const symbol of basicSymbols) {
-        const aggregatorId = switchboardAggregators[symbol];
-        if (!aggregatorId) continue;
-        const prepared = await this.prepareSwitchboard(aggregatorId);
-        if (prepared) switchboard[symbol] = prepared;
-      }
+    for (const symbol of basicSymbols) {
+      const aggregatorId = switchboardAggregators[symbol];
+      if (!aggregatorId) continue;
+      const prepared = await this.prepareSwitchboard(aggregatorId);
+      if (prepared) switchboard[symbol] = prepared;
     }
 
-    return { pyth, switchboard };
+    return { switchboard };
   }
 
   /**
@@ -826,111 +780,50 @@ export class VirtueClient {
   /**
    * @description Whether the prepared data can actually price this collateral.
    *
-   * Answered by building the aggregation on a throwaway transaction and
-   * dev-inspecting it, rather than by reasoning about which rules are
-   * configured. Configuration is not the question — being wired up to
-   * Switchboard says nothing about whether its aggregator still holds a result
-   * the rule will accept. With nothing cranked and a stale aggregator the rule
-   * abstains, `aggregate` fails its threshold with
-   * `err_total_weight_not_enough`, and a predicate that had said "yes" would
-   * already have written a doomed position onto the caller's transaction.
+   * Answered by building the aggregation and dev-inspecting it, rather than by
+   * reasoning about which rules are configured. Configuration is not the
+   * question — being wired up to Switchboard says nothing about whether its
+   * aggregator still holds a result the rule will accept. With nothing cranked
+   * and a stale aggregator the rule abstains, `aggregate` fails its threshold
+   * with `err_total_weight_not_enough`, and a predicate that had said "yes"
+   * would already have written a doomed position onto the caller's transaction.
    *
    * Running the real thing also covers what a predicate would miss: a rule
-   * config that has drifted from the aggregator it is asked about, a Pyth feed
-   * whose `PriceInfoObject` is too stale for its own freshness gate, or any
-   * future rule with its own abort conditions.
+   * config drifted from the aggregator it is asked about, or any future rule
+   * with its own abort conditions.
    *
-   * The caller's transaction is swapped out for the duration and restored, so
-   * this leaves nothing behind either way.
+   * Built on a transaction of its own. Assigning a scratch transaction to
+   * `this.transaction` for the duration would expose it through
+   * `getTransaction()` and, worse, let a concurrent build or
+   * `resetTransaction()` land in that window only to be overwritten when this
+   * restored the old one.
+   *
+   * A dev-inspection that *executes* and reports failure means no rule can
+   * price this collateral. A dev-inspection that could not run at all means
+   * nothing of the sort, so transport failures are raised rather than folded
+   * into a `false` that would blame the oracles for a throttled RPC.
    */
   private async canPriceCollateral(
     collateralSymbol: COLLATERAL_COIN,
     prepared: PreparedOracleUpdates,
   ): Promise<boolean> {
-    const callerTransaction = this.transaction;
-    this.transaction = new Transaction();
-    try {
-      const priceResults = await this.aggregatePricesWith(prepared);
-      if (!priceResults[collateralSymbol]) return false;
-      const inspect = await this.iotaClient.devInspectTransactionBlock({
-        sender: DUMMY_ADDRESS,
-        transactionBlock: this.transaction,
-      });
-      return inspect.effects.status.status === "success";
-    } catch {
-      return false;
-    } finally {
-      this.transaction = callerTransaction;
-    }
-  }
+    const probe = new Transaction();
+    const priceResults = await this.aggregatePricesWith(prepared, probe);
+    if (!priceResults[collateralSymbol]) return false;
 
-  /**
-   * @description Fetch Pyth update data and prove it verifies on chain, without
-   * touching the current transaction.
-   *
-   * A Pyth update carries a Wormhole VAA, and `vaa::parse_and_verify` aborts
-   * outright once Hermes has moved to a guardian set newer than the one
-   * registered on IOTA. That abort is not an SDK error — it takes down the whole
-   * PTB, borrow or liquidation included — so the update is devInspected on a
-   * throwaway transaction first and only data that passes is returned.
-   *
-   * Never throws; an unreachable Hermes or a failing probe both come back
-   * `null`, and the caller drops the Pyth rule for those symbols.
-   */
-  private async preparePythUpdate(
-    pythPriceIds: string[],
-  ): Promise<PreparedPythUpdate | null> {
+    let inspect;
     try {
-      const updateData =
-        await this.pythConnection.getPriceFeedsUpdateData(pythPriceIds);
-
-      const probe = new Transaction();
-      await this.pythClient.updatePriceFeeds(
-        probe as any,
-        updateData,
-        pythPriceIds,
-      );
-      const inspect = await this.iotaClient.devInspectTransactionBlock({
+      inspect = await this.iotaClient.devInspectTransactionBlock({
         sender: DUMMY_ADDRESS,
         transactionBlock: probe,
       });
-      if (inspect.effects.status.status !== "success") return null;
-
-      return { priceIds: pythPriceIds, updateData };
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * @description Add the prepared Pyth update to the current transaction and
-   * return the `PriceInfoObject` ids `pyth_rule::feed` should read.
-   *
-   * The probe in `preparePythUpdate` already drove the same call once, which
-   * populated the Pyth client's package, base-fee and price-object caches, so
-   * this is transaction building rather than another round of I/O.
-   *
-   * An undefined entry means Pyth contributes nothing for that symbol, and the
-   * caller drops `pyth_rule::feed` for it. The rule cannot be pointed at the
-   * un-updated `PriceInfoObject` as a consolation: it does not abstain on a
-   * stale price, it aborts through `pyth::check_price_is_fresh`, taking the PTB
-   * down exactly the way a failed update does.
-   */
-  private async applyPythUpdate(
-    prepared: PreparedPythUpdate | null,
-    pythPriceIds: string[],
-  ): Promise<(string | undefined)[]> {
-    const noneFed = () => pythPriceIds.map(() => undefined);
-    if (!prepared) return noneFed();
-    try {
-      return await this.pythClient.updatePriceFeeds(
-        this.transaction as any,
-        prepared.updateData,
-        prepared.priceIds,
+    } catch (error) {
+      throw new Error(
+        `Could not determine whether ${collateralSymbol} is priceable: the RPC dev-inspection could not be performed. This is a transport failure, not an oracle one.`,
+        { cause: error },
       );
-    } catch {
-      return noneFed();
     }
+    return inspect.effects.status.status === "success";
   }
 
   /**
@@ -1029,8 +922,8 @@ export class VirtueClient {
     if (!pkg) return false;
     // `Buffer` is a Node global that browser bundles do not provide, and the
     // ReferenceError would be swallowed by the fail-soft catch around
-    // preparation — quietly disabling Switchboard for dApp consumers exactly
-    // when Pyth is the source that has failed. `fromHEX` works in both runtimes.
+    // preparation — quietly disabling the only price source there is, for every
+    // dApp consumer. `fromHEX` works in both runtimes.
     let signature: Uint8Array;
     try {
       signature = fromHEX(r.signature);
@@ -1064,13 +957,16 @@ export class VirtueClient {
    * reads it. Returns how many were added; zero simply means the rule will read
    * whatever is already on chain and abstain if that is stale.
    */
-  private applySwitchboard(prepared: PreparedSwitchboard | undefined): number {
+  private applySwitchboard(
+    prepared: PreparedSwitchboard | undefined,
+    tx: Transaction,
+  ): number {
     if (!prepared) return 0;
     let added = 0;
     for (const r of prepared.results) {
       if (
         this.addSwitchboardSubmission(
-          this.transaction,
+          tx,
           prepared.aggregatorId,
           prepared.queue,
           r,
@@ -1104,81 +1000,52 @@ export class VirtueClient {
    */
   private async aggregatePricesWith(
     prepared: PreparedOracleUpdates,
+    tx: Transaction = this.transaction,
   ): Promise<Partial<Record<COLLATERAL_COIN, TransactionResult>>> {
     const basicSymbol = BASIC_PRICE_SYMBOLS;
-    const pythRuleConfig = this.transaction.sharedObjectRef(
-      this.config.PYTH_RULE_CONFIG_OBJ,
-    );
-    const pythStateObj = this.transaction.object(this.config.PYTH_STATE_ID);
-    const pythPriceIds = basicSymbol.map(
-      (symbol) => this.config.VAULT_MAP[symbol].pythPriceId ?? "",
-    );
-    const priceInfoObjIds = await this.applyPythUpdate(
-      prepared.pyth,
-      pythPriceIds,
-    );
 
     // Switchboard reads whatever was last submitted, so the refresh goes into
     // this same PTB, ahead of everything that reads it.
     const switchboardAggregators = this.config.SWITCHBOARD_AGGREGATORS ?? {};
     for (const symbol of basicSymbol) {
-      this.applySwitchboard(prepared.switchboard[symbol]);
+      this.applySwitchboard(prepared.switchboard[symbol], tx);
     }
 
     const basicPriceResults = basicSymbol.reduce(
-      (result, symbol, idx) => {
+      (result, symbol) => {
         const coinType = this.config.COIN_TYPES[symbol];
-        const priceInfoObjId = priceInfoObjIds[idx];
         const switchboardAggregatorId = switchboardAggregators[symbol];
         const switchboardFeeds = this.switchboardRuleFeeds(symbol);
 
         // `aggregate` needs at least one source to reach its threshold, so a
         // symbol no rule can price is left out of the transaction altogether
         // rather than being aggregated into a guaranteed abort.
-        if (!priceInfoObjId && !switchboardFeeds) return result;
+        if (!switchboardFeeds) return result;
 
-        const collector = this.newPriceCollector(symbol);
-        if (priceInfoObjId) {
-          this.transaction.moveCall({
-            target: `${this.config.PYTH_RULE_PACKAGE_ID}::pyth_rule::feed`,
-            typeArguments: [coinType],
-            arguments: [
-              collector,
-              pythRuleConfig,
-              this.transaction.object.clock(),
-              pythStateObj,
-              this.transaction.object(priceInfoObjId),
-            ],
-          });
-        }
-        // Switchboard contributes to the same collector, so both rules land in
-        // one aggregation. Unlike the Pyth rule this one is safe to add even
-        // when its crank fed nothing: `feed` abstains on a stale aggregator
-        // rather than aborting. It is not unconditionally fail-soft though — a
-        // coin type it has no mapping for, or an aggregator other than the one
-        // registered for that coin, both abort — which is why priceability is
-        // settled by dev-inspecting the real aggregation.
+        const collector = this.newPriceCollector(symbol, tx);
+        // `feed` abstains on a stale aggregator rather than aborting, so it is
+        // safe to add even when the crank fed nothing. It is not
+        // unconditionally fail-soft though — a coin type it has no mapping for,
+        // or an aggregator other than the one registered for that coin, both
+        // abort — which is why priceability is settled by dev-inspecting the
+        // real aggregation rather than inferred from configuration.
         if (switchboardFeeds && switchboardAggregatorId) {
-          this.transaction.moveCall({
+          tx.moveCall({
             target: `${this.config.SWITCHBOARD_RULE_PACKAGE_ID}::switchboard_rule::feed`,
             typeArguments: [coinType],
             arguments: [
               collector,
-              this.transaction.sharedObjectRef(
-                this.config.SWITCHBOARD_RULE_CONFIG_OBJ!,
-              ),
-              this.transaction.object.clock(),
-              this.transaction.object(switchboardAggregatorId),
+              tx.sharedObjectRef(this.config.SWITCHBOARD_RULE_CONFIG_OBJ!),
+              tx.object.clock(),
+              tx.object(switchboardAggregatorId),
             ],
           });
         }
-        const priceResult = this.transaction.moveCall({
+        const priceResult = tx.moveCall({
           target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
           typeArguments: [coinType],
           arguments: [
-            this.transaction.sharedObjectRef(
-              this.config.VAULT_MAP[symbol].priceAggregater,
-            ),
+            tx.sharedObjectRef(this.config.VAULT_MAP[symbol].priceAggregater),
             collector,
           ],
         });
@@ -1193,45 +1060,41 @@ export class VirtueClient {
     const iotaPriceResult = basicPriceResults.IOTA;
 
     // deal with stIOTA
-    const stIotaCollector = this.newPriceCollector("stIOTA");
-    this.transaction.moveCall({
+    const stIotaCollector = this.newPriceCollector("stIOTA", tx);
+    tx.moveCall({
       target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
       arguments: [
         stIotaCollector,
         iotaPriceResult,
-        this.transaction.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
-        this.transaction.sharedObjectRef(this.config.CERT_METADATA_OBJ),
+        tx.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
+        tx.sharedObjectRef(this.config.CERT_METADATA_OBJ),
       ],
     });
-    const stIotaPrice = this.transaction.moveCall({
+    const stIotaPrice = tx.moveCall({
       target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
       typeArguments: [this.config.COIN_TYPES.stIOTA],
       arguments: [
-        this.transaction.sharedObjectRef(
-          this.config.VAULT_MAP.stIOTA.priceAggregater,
-        ),
+        tx.sharedObjectRef(this.config.VAULT_MAP.stIOTA.priceAggregater),
         stIotaCollector,
       ],
     });
 
     // deal with vIOTA
-    const vIotaCollector = this.newPriceCollector("vIOTA");
-    this.transaction.moveCall({
+    const vIotaCollector = this.newPriceCollector("vIOTA", tx);
+    tx.moveCall({
       target: `${this.config.VCERT_RULE_PACKAGE_ID}::vcert_rule::feed`,
       arguments: [
         vIotaCollector,
         iotaPriceResult,
-        this.transaction.sharedObjectRef(this.config.VCERT_NATIVE_POOL_OBJ),
-        this.transaction.sharedObjectRef(this.config.VCERT_METADATA_OBJ),
+        tx.sharedObjectRef(this.config.VCERT_NATIVE_POOL_OBJ),
+        tx.sharedObjectRef(this.config.VCERT_METADATA_OBJ),
       ],
     });
-    const vIotaPrice = this.transaction.moveCall({
+    const vIotaPrice = tx.moveCall({
       target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
       typeArguments: [this.config.COIN_TYPES.vIOTA],
       arguments: [
-        this.transaction.sharedObjectRef(
-          this.config.VAULT_MAP.vIOTA.priceAggregater,
-        ),
+        tx.sharedObjectRef(this.config.VAULT_MAP.vIOTA.priceAggregater),
         vIotaCollector,
       ],
     });
@@ -1554,6 +1417,19 @@ export class VirtueClient {
    * @param accountObjId: the Account object to hold position (undefined if just use EOA)
    * @param recipient (optional): the recipient of the output coins
    * @returns Transaction
+   *
+   * **Sign and execute this promptly.** Borrowing or withdrawing embeds a signed
+   * Switchboard response, and the queue only accepts one for
+   * `max_staleness_seconds` after the oracle signed it — 150s on the configured
+   * queue, counted from the signing time rather than from now, so the usable
+   * window is shorter than that. Past it,
+   * `aggregator_submit_result_action::validate` aborts and takes the whole
+   * transaction with it. A transaction held that long must be rebuilt, not
+   * resubmitted. This deadline is inherent to feeding a price on chain.
+   *
+   * Either the whole position is built or the transaction is left exactly as it
+   * was found — including when the collateral turns out to be unpriceable, which
+   * is settled before anything is written.
    */
   async buildManagePositionTransaction(inputs: {
     collateralSymbol: COLLATERAL_COIN;
@@ -1578,7 +1454,7 @@ export class VirtueClient {
     // the build is asked up front, while the transaction is still untouched.
     let prepared: PreparedOracleUpdates | undefined;
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      prepared = await this.prepareOracleUpdates({ forDeferredSigning: true });
+      prepared = await this.prepareOracleUpdates();
       if (!(await this.canPriceCollateral(collateralSymbol, prepared))) {
         throw new Error(
           `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`,

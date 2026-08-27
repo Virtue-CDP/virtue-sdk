@@ -1,12 +1,11 @@
 import { Transaction, TransactionResult, TransactionArgument } from '@iota/iota-sdk/transactions';
 import { IotaClient, DryRunTransactionBlockResponse, IotaTransactionBlockResponseOptions, IotaTransactionBlockResponse, IotaObjectData, IotaParsedData, IotaObjectResponse, IotaMoveObject } from '@iota/iota-sdk/client';
-import { IotaPriceServiceConnection, IotaPythClient } from '@pythnetwork/pyth-iota-js';
 import { Keypair } from '@iota/iota-sdk/cryptography';
 import * as superstruct from 'superstruct';
 import { Infer } from 'superstruct';
 
-type COIN = "VUSD" | "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
-type COLLATERAL_COIN = "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
+type COIN = "VUSD" | "IOTA" | "stIOTA" | "vIOTA";
+type COLLATERAL_COIN = "IOTA" | "stIOTA" | "vIOTA";
 
 type Float = {
     fields: {
@@ -77,7 +76,6 @@ type RewarderInfo = {
 type VaultObjectInfo = {
     priceAggregater: SharedObjectRef;
     vault: SharedObjectRef;
-    pythPriceId?: string;
     rewarders?: Rewarder[];
 };
 type Rewarder = SharedObjectRef & {
@@ -125,10 +123,6 @@ type ConfigType = {
     STABILITY_POOL_OBJ: SharedObjectRef;
     VAULT_REWARDER_REGISTRY_OBJ: SharedObjectRef;
     POOL_REWARDER_REGISTRY_OBJ: SharedObjectRef;
-    PYTH_STATE_ID: string;
-    WORMHOLE_STATE_ID: string;
-    PYTH_RULE_PACKAGE_ID: string;
-    PYTH_RULE_CONFIG_OBJ: SharedObjectRef;
     CERT_RULE_PACKAGE_ID: string;
     CERT_NATIVE_POOL_OBJ: SharedObjectRef;
     CERT_METADATA_OBJ: SharedObjectRef;
@@ -161,8 +155,6 @@ declare class VirtueClient {
      */
     private rpcEndpoint;
     private iotaClient;
-    private pythConnection;
-    private pythClient;
     transaction: Transaction;
     sender: string;
     config: ConfigType;
@@ -175,14 +167,6 @@ declare class VirtueClient {
      * @description Get this.iotaClient
      */
     getIotaClient(): IotaClient;
-    /**
-     * @description Get this.pythConnection
-     */
-    getPythConnection(): IotaPriceServiceConnection;
-    /**
-     * @description Get this.pythClient
-     */
-    getPythClient(): IotaPythClient;
     getAllCollateralSymbol(): COLLATERAL_COIN[];
     /**
      * @description Price every collateral by dry-running `aggregatePrices` and
@@ -190,10 +174,9 @@ declare class VirtueClient {
      *
      * A symbol is **absent** from the result when no oracle rule could price it —
      * `aggregatePrices` leaves such a symbol out of the transaction, so it emits
-     * no event. iBTC is the live example: it is fed by Pyth alone, so it drops out
-     * whenever the Pyth update cannot be applied, while IOTA carries on through
-     * Switchboard. The return type is `Partial` to say so; treat a missing entry
-     * as "no price available right now", never as zero.
+     * no event, and the derived symbols go with it since they are computed from
+     * the IOTA price. The return type is `Partial` to say so; treat a missing
+     * entry as "no price available right now", never as zero.
      */
     getCollateralPrices(): Promise<Partial<Record<COLLATERAL_COIN, number>>>;
     /**
@@ -276,7 +259,7 @@ declare class VirtueClient {
      * @param collateral coin symbol, e.g "IOTA"
      * @return PriceCollector
      */
-    newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
+    newPriceCollector(collateralSymbol: COLLATERAL_COIN, tx?: Transaction): TransactionArgument;
     /**
      * @description Resolve everything the oracle rules need from the network,
      * without writing anything to the transaction.
@@ -311,53 +294,30 @@ declare class VirtueClient {
     /**
      * @description Whether the prepared data can actually price this collateral.
      *
-     * Answered by building the aggregation on a throwaway transaction and
-     * dev-inspecting it, rather than by reasoning about which rules are
-     * configured. Configuration is not the question — being wired up to
-     * Switchboard says nothing about whether its aggregator still holds a result
-     * the rule will accept. With nothing cranked and a stale aggregator the rule
-     * abstains, `aggregate` fails its threshold with
-     * `err_total_weight_not_enough`, and a predicate that had said "yes" would
-     * already have written a doomed position onto the caller's transaction.
+     * Answered by building the aggregation and dev-inspecting it, rather than by
+     * reasoning about which rules are configured. Configuration is not the
+     * question — being wired up to Switchboard says nothing about whether its
+     * aggregator still holds a result the rule will accept. With nothing cranked
+     * and a stale aggregator the rule abstains, `aggregate` fails its threshold
+     * with `err_total_weight_not_enough`, and a predicate that had said "yes"
+     * would already have written a doomed position onto the caller's transaction.
      *
      * Running the real thing also covers what a predicate would miss: a rule
-     * config that has drifted from the aggregator it is asked about, a Pyth feed
-     * whose `PriceInfoObject` is too stale for its own freshness gate, or any
-     * future rule with its own abort conditions.
+     * config drifted from the aggregator it is asked about, or any future rule
+     * with its own abort conditions.
      *
-     * The caller's transaction is swapped out for the duration and restored, so
-     * this leaves nothing behind either way.
+     * Built on a transaction of its own. Assigning a scratch transaction to
+     * `this.transaction` for the duration would expose it through
+     * `getTransaction()` and, worse, let a concurrent build or
+     * `resetTransaction()` land in that window only to be overwritten when this
+     * restored the old one.
+     *
+     * A dev-inspection that *executes* and reports failure means no rule can
+     * price this collateral. A dev-inspection that could not run at all means
+     * nothing of the sort, so transport failures are raised rather than folded
+     * into a `false` that would blame the oracles for a throttled RPC.
      */
     private canPriceCollateral;
-    /**
-     * @description Fetch Pyth update data and prove it verifies on chain, without
-     * touching the current transaction.
-     *
-     * A Pyth update carries a Wormhole VAA, and `vaa::parse_and_verify` aborts
-     * outright once Hermes has moved to a guardian set newer than the one
-     * registered on IOTA. That abort is not an SDK error — it takes down the whole
-     * PTB, borrow or liquidation included — so the update is devInspected on a
-     * throwaway transaction first and only data that passes is returned.
-     *
-     * Never throws; an unreachable Hermes or a failing probe both come back
-     * `null`, and the caller drops the Pyth rule for those symbols.
-     */
-    private preparePythUpdate;
-    /**
-     * @description Add the prepared Pyth update to the current transaction and
-     * return the `PriceInfoObject` ids `pyth_rule::feed` should read.
-     *
-     * The probe in `preparePythUpdate` already drove the same call once, which
-     * populated the Pyth client's package, base-fee and price-object caches, so
-     * this is transaction building rather than another round of I/O.
-     *
-     * An undefined entry means Pyth contributes nothing for that symbol, and the
-     * caller drops `pyth_rule::feed` for it. The rule cannot be pointed at the
-     * un-updated `PriceInfoObject` as a consolation: it does not abstain on a
-     * stale price, it aborts through `pyth::check_price_is_fresh`, taking the PTB
-     * down exactly the way a failed update does.
-     */
-    private applyPythUpdate;
     /**
      * @description Fetch signed Switchboard responses and keep the ones that will
      * actually validate on chain, without touching the current transaction.
@@ -521,6 +481,19 @@ declare class VirtueClient {
      * @param accountObjId: the Account object to hold position (undefined if just use EOA)
      * @param recipient (optional): the recipient of the output coins
      * @returns Transaction
+     *
+     * **Sign and execute this promptly.** Borrowing or withdrawing embeds a signed
+     * Switchboard response, and the queue only accepts one for
+     * `max_staleness_seconds` after the oracle signed it — 150s on the configured
+     * queue, counted from the signing time rather than from now, so the usable
+     * window is shorter than that. Past it,
+     * `aggregator_submit_result_action::validate` aborts and takes the whole
+     * transaction with it. A transaction held that long must be rebuilt, not
+     * resubmitted. This deadline is inherent to feeding a price on chain.
+     *
+     * Either the whole position is built or the transaction is left exactly as it
+     * was found — including when the collateral turns out to be unpriceable, which
+     * is settled before anything is written.
      */
     buildManagePositionTransaction(inputs: {
         collateralSymbol: COLLATERAL_COIN;
