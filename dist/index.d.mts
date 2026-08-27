@@ -1,12 +1,11 @@
 import { Transaction, TransactionResult, TransactionArgument } from '@iota/iota-sdk/transactions';
 import { IotaClient, DryRunTransactionBlockResponse, IotaTransactionBlockResponseOptions, IotaTransactionBlockResponse, IotaObjectData, IotaParsedData, IotaObjectResponse, IotaMoveObject } from '@iota/iota-sdk/client';
-import { IotaPriceServiceConnection, IotaPythClient } from '@pythnetwork/pyth-iota-js';
 import { Keypair } from '@iota/iota-sdk/cryptography';
 import * as superstruct from 'superstruct';
 import { Infer } from 'superstruct';
 
-type COIN = "VUSD" | "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
-type COLLATERAL_COIN = "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
+type COIN = "VUSD" | "IOTA" | "stIOTA" | "vIOTA";
+type COLLATERAL_COIN = "IOTA" | "stIOTA" | "vIOTA";
 
 type Float = {
     fields: {
@@ -77,7 +76,6 @@ type RewarderInfo = {
 type VaultObjectInfo = {
     priceAggregater: SharedObjectRef;
     vault: SharedObjectRef;
-    pythPriceId?: string;
     rewarders?: Rewarder[];
 };
 type Rewarder = SharedObjectRef & {
@@ -125,16 +123,22 @@ type ConfigType = {
     STABILITY_POOL_OBJ: SharedObjectRef;
     VAULT_REWARDER_REGISTRY_OBJ: SharedObjectRef;
     POOL_REWARDER_REGISTRY_OBJ: SharedObjectRef;
-    PYTH_STATE_ID: string;
-    WORMHOLE_STATE_ID: string;
-    PYTH_RULE_PACKAGE_ID: string;
-    PYTH_RULE_CONFIG_OBJ: SharedObjectRef;
     CERT_RULE_PACKAGE_ID: string;
     CERT_NATIVE_POOL_OBJ: SharedObjectRef;
     CERT_METADATA_OBJ: SharedObjectRef;
     VCERT_RULE_PACKAGE_ID: string;
     VCERT_NATIVE_POOL_OBJ: SharedObjectRef;
     VCERT_METADATA_OBJ: SharedObjectRef;
+    /**
+     * Switchboard On-Demand. Optional: where these are absent `aggregatePrices`
+     * skips the crank and the `switchboard_rule::feed` call entirely, which is what
+     * testnet does — there is no deployment there.
+     */
+    SWITCHBOARD_PACKAGE_ID?: string;
+    SWITCHBOARD_RULE_PACKAGE_ID?: string;
+    SWITCHBOARD_RULE_CONFIG_OBJ?: SharedObjectRef;
+    /** Coin symbol -> the one `Aggregator` object `feed<T>` accepts for it. */
+    SWITCHBOARD_AGGREGATORS?: Partial<Record<COLLATERAL_COIN, string>>;
     POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
     POINT_MANAGER_OBJ: SharedObjectRef;
     STABILITY_POOL_TABLE_ID: string;
@@ -151,8 +155,6 @@ declare class VirtueClient {
      */
     private rpcEndpoint;
     private iotaClient;
-    private pythConnection;
-    private pythClient;
     transaction: Transaction;
     sender: string;
     config: ConfigType;
@@ -165,19 +167,18 @@ declare class VirtueClient {
      * @description Get this.iotaClient
      */
     getIotaClient(): IotaClient;
-    /**
-     * @description Get this.pythConnection
-     */
-    getPythConnection(): IotaPriceServiceConnection;
-    /**
-     * @description Get this.pythClient
-     */
-    getPythClient(): IotaPythClient;
     getAllCollateralSymbol(): COLLATERAL_COIN[];
     /**
-     * @description
+     * @description Price every collateral by dry-running `aggregatePrices` and
+     * reading the emitted `PriceAggregated` events.
+     *
+     * A symbol is **absent** from the result when no oracle rule could price it —
+     * `aggregatePrices` leaves such a symbol out of the transaction, so it emits
+     * no event, and the derived symbols go with it since they are computed from
+     * the IOTA price. The return type is `Partial` to say so; treat a missing
+     * entry as "no price available right now", never as zero.
      */
-    getCollateralPrices(): Promise<Record<COLLATERAL_COIN, number>>;
+    getCollateralPrices(): Promise<Partial<Record<COLLATERAL_COIN, number>>>;
     /**
      * @description Get all vault objects
      */
@@ -258,13 +259,119 @@ declare class VirtueClient {
      * @param collateral coin symbol, e.g "IOTA"
      * @return PriceCollector
      */
-    newPriceCollector(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
+    newPriceCollector(collateralSymbol: COLLATERAL_COIN, tx?: Transaction): TransactionArgument;
+    /**
+     * @description Resolve everything the oracle rules need from the network,
+     * without writing anything to the transaction.
+     *
+     * Building a position is not reversible. Commands can only be appended to a
+     * `Transaction`, never removed — `getData()` returns a snapshot and the
+     * builder behind it is private — and swapping in a rebuilt object is no
+     * substitute, since that changes the identity a caller is composing against
+     * and drops that instance's plugins and intent resolvers. So everything that
+     * can fail happens here, before the first command is written, and applying the
+     * result afterwards is pure transaction building.
+     *
+     * The prepared data is then carried into the aggregation rather than fetched
+     * again. Probing and refetching would leave a window where the preflight
+     * passes and the real fetch fails, throwing only after the transaction had
+     * been written to — and it would pay for the same work twice.
+     */
+    private prepareOracleUpdates;
+    /**
+     * @description Whether the Switchboard rule is wired up for a symbol at all.
+     *
+     * Config alone decides whether the rule is *added*. It abstains on a stale
+     * aggregator rather than aborting, so adding it costs nothing — but note it is
+     * not unconditionally fail-soft: the deployed rule aborts on a coin type it
+     * has no mapping for (`err_unsupported_coin_type`) or an aggregator that is
+     * not the one registered for that coin (`err_invalid_aggregator`). Live config
+     * is aligned today, and `canPriceCollateral` dev-inspects the real aggregation
+     * rather than trusting that, so a drifted rule config surfaces as "cannot
+     * price" instead of a failed transaction.
+     */
+    private switchboardRuleFeeds;
+    /**
+     * @description Whether the prepared data can actually price this collateral.
+     *
+     * Answered by building the aggregation and dev-inspecting it, rather than by
+     * reasoning about which rules are configured. Configuration is not the
+     * question — being wired up to Switchboard says nothing about whether its
+     * aggregator still holds a result the rule will accept. With nothing cranked
+     * and a stale aggregator the rule abstains, `aggregate` fails its threshold
+     * with `err_total_weight_not_enough`, and a predicate that had said "yes"
+     * would already have written a doomed position onto the caller's transaction.
+     *
+     * Running the real thing also covers what a predicate would miss: a rule
+     * config drifted from the aggregator it is asked about, or any future rule
+     * with its own abort conditions.
+     *
+     * Built on a transaction of its own. Assigning a scratch transaction to
+     * `this.transaction` for the duration would expose it through
+     * `getTransaction()` and, worse, let a concurrent build or
+     * `resetTransaction()` land in that window only to be overwritten when this
+     * restored the old one.
+     *
+     * A dev-inspection that *executes* and reports failure means no rule can
+     * price this collateral. A dev-inspection that could not run at all means
+     * nothing of the sort, so transport failures are raised rather than folded
+     * into a `false` that would blame the oracles for a throttled RPC.
+     */
+    private canPriceCollateral;
+    /**
+     * @description Fetch signed Switchboard responses and keep the ones that will
+     * actually validate on chain, without touching the current transaction.
+     *
+     * Switchboard is on-demand, not push: `Aggregator.current_result` only changes
+     * when someone submits a signed oracle response. Left alone the IOTA mainnet
+     * feed sat 330 days stale, so the crank belongs in the same PTB as the read.
+     *
+     * Two things make this awkward, both handled here:
+     *
+     * - Most oracles on the IOTA queues are broken — their signature no longer
+     *   recovers to the `secp256k1_key` in their on-chain `Oracle` object, so
+     *   `aggregator_submit_result_action::validate` aborts. Crossbar hands out one
+     *   at random per request, so a plain crank succeeds about a quarter of the
+     *   time. `numSignatures` asks for the whole set instead.
+     * - A PTB is all-or-nothing, so one broken oracle would take the entire price
+     *   read — and whatever borrow or liquidation is bundled with it — down too.
+     *   Each response is therefore devInspected on its own and only the survivors
+     *   are kept.
+     *
+     * Never throws: a crossbar outage, a slow endpoint, a malformed response or an
+     * RPC failure all come back `null`. Switchboard is one rule among several, so
+     * raising here would take down price reads that the others could have served.
+     */
+    private prepareSwitchboard;
+    /**
+     * @description Append one `aggregator_submit_result_action::run` call. Pure —
+     * no I/O — so replaying a response that already passed its probe cannot fail.
+     * Returns false for a signature that is not the 65 bytes the action expects.
+     */
+    private addSwitchboardSubmission;
+    /**
+     * @description Add the prepared Switchboard submissions to the current
+     * transaction, so the aggregator is fresh before anything in this same PTB
+     * reads it. Returns how many were added; zero simply means the rule will read
+     * whatever is already on chain and abstain if that is stale.
+     */
+    private applySwitchboard;
     /**
      * @description Get a price result
      * @param collateral coin symbol, e.g "IOTA"
      * @return [PriceResult]
      */
-    aggregatePrices(): Promise<Record<COLLATERAL_COIN, TransactionResult>>;
+    aggregatePrices(): Promise<Partial<Record<COLLATERAL_COIN, TransactionResult>>>;
+    /**
+     * @description The transaction-building half of `aggregatePrices`, working
+     * only from data already fetched and validated by `prepareOracleUpdates`.
+     *
+     * Kept separate so a position build can settle whether its collateral is
+     * priceable before writing anything, then build from that exact same prepared
+     * data — no second fetch, and so no window for the answer to change in
+     * between.
+     */
+    private aggregatePricesWith;
     /**
      * @description Get a request to Mange Position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
@@ -374,6 +481,19 @@ declare class VirtueClient {
      * @param accountObjId: the Account object to hold position (undefined if just use EOA)
      * @param recipient (optional): the recipient of the output coins
      * @returns Transaction
+     *
+     * **Sign and execute this promptly.** Borrowing or withdrawing embeds a signed
+     * Switchboard response, and the queue only accepts one for
+     * `max_staleness_seconds` after the oracle signed it — 150s on the configured
+     * queue, counted from the signing time rather than from now, so the usable
+     * window is shorter than that. Past it,
+     * `aggregator_submit_result_action::validate` aborts and takes the whole
+     * transaction with it. A transaction held that long must be rebuilt, not
+     * resubmitted. This deadline is inherent to feeding a price on chain.
+     *
+     * Either the whole position is built or the transaction is left exactly as it
+     * was found — including when the collateral turns out to be unpriceable, which
+     * is settled before anything is written.
      */
     buildManagePositionTransaction(inputs: {
         collateralSymbol: COLLATERAL_COIN;
@@ -385,6 +505,11 @@ declare class VirtueClient {
         recipient?: string;
         keepTransaction?: boolean;
     }): Promise<Transaction>;
+    /**
+     * @description The body of `buildManagePositionTransaction`, split out so the
+     * entry point above can settle its preconditions before anything is written.
+     */
+    private buildManagePosition;
     /**
      * @description build and return Transaction of close position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
