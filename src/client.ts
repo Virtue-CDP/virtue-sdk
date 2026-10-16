@@ -31,6 +31,8 @@ import { getObjectFields, parseVaultObject } from "@/utils";
 import { bcs } from "@iota/iota-sdk/bcs";
 import {
   fromHEX,
+  isValidIotaAddress,
+  isValidIotaObjectId,
   normalizeIotaAddress,
   normalizeStructTag,
 } from "@iota/iota-sdk/utils";
@@ -44,11 +46,11 @@ const LAZER_FETCH_TIMEOUT_MS = 5_000;
  * Each serves the same signed data. Override with `pythLazer.endpoint` to go
  * through a proxy; exported so that proxy can use the same hosts.
  */
-export const DEFAULT_LAZER_ENDPOINTS = [
+export const DEFAULT_LAZER_ENDPOINTS: readonly string[] = Object.freeze([
   "https://pyth-lazer-0.dourolabs.app",
   "https://pyth-lazer-1.dourolabs.app",
   "https://pyth-lazer-2.dourolabs.app",
-];
+]);
 
 /**
  * Properties requested in every Lazer update. `pyth_lazer_rule` abstains on an
@@ -58,13 +60,13 @@ export const DEFAULT_LAZER_ENDPOINTS = [
  * Exported so a proxy in front of Lazer can request exactly this list rather
  * than keep a copy that drifts when the SDK needs another property.
  */
-export const LAZER_PROPERTIES = [
+export const LAZER_PROPERTIES = Object.freeze([
   "price",
   "exponent",
   "confidence",
   "feedUpdateTimestamp",
   "marketSession",
-] as const;
+] as const);
 
 /** The collaterals priced directly by an oracle; the rest are derived from these. */
 const BASIC_PRICE_SYMBOLS: COLLATERAL_COIN[] = ["IOTA", "iBTC"];
@@ -106,7 +108,7 @@ export type PythLazerAccess = {
    * Base URL(s) serving `POST /v1/latest_price`, tried in order until one
    * returns an update. Defaults to Pyth's own hosts.
    */
-  endpoint?: string | string[];
+  endpoint?: string | readonly string[];
 };
 
 const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
@@ -127,10 +129,18 @@ const normalizeTypeName = (type: string): string => {
   return [normalizeIotaAddress(address).replace(/^0x/, ""), ...rest].join("::");
 };
 
-/** One wording for every check that refuses a build for want of a price. */
-const noPriceError = (symbol: COLLATERAL_COIN) =>
+/**
+ * One wording for every check that refuses a build for want of a price. When a
+ * withdrawal without a price was also tried and the chain rejected it, its abort
+ * is appended: that cause may have nothing to do with the oracle (no position,
+ * withdrawing too much, the protocol paused).
+ */
+const noPriceError = (symbol: COLLATERAL_COIN, withoutPriceRejection?: string) =>
   new Error(
-    `No oracle rule could price ${symbol}: borrowing, and withdrawing while in debt, require a price.`,
+    `No oracle rule could price ${symbol}: borrowing, and withdrawing while in debt, require a price.` +
+      (withoutPriceRejection
+        ? ` A withdrawal without a price was rejected on chain: ${withoutPriceRejection}`
+        : ""),
   );
 
 const TYPE_NAME_STRUCT = bcs.struct("TypeName", {
@@ -1720,15 +1730,28 @@ export class VirtueClient {
     withdrawAmount: string;
     accountObjId?: string;
     recipient?: string;
-  }): Promise<boolean> {
+  }): Promise<{ ok: boolean; rejection?: string }> {
     const plainWithdrawal =
       Number(inputs.withdrawAmount) > 0 &&
       Number(inputs.borrowAmount) === 0 &&
       Number(inputs.depositAmount) === 0 &&
       Number(inputs.repaymentAmount) === 0;
-    if (!plainWithdrawal) return false;
-    if (this.sender === DUMMY_ADDRESS) return false;
-    if (this.transaction.getData().commands.length > 0) return false;
+    if (!plainWithdrawal) return { ok: false };
+    if (this.sender === DUMMY_ADDRESS) return { ok: false };
+    if (this.transaction.getData().commands.length > 0) return { ok: false };
+
+    // Input mistakes fail while the probe is built, inside the inspection call
+    // below, where they would be reported as an unreachable RPC. Reject them
+    // here, as the input errors they are.
+    const { recipient, accountObjId } = inputs;
+    if (recipient !== undefined && !isValidIotaAddress(normalizeIotaAddress(recipient))) {
+      throw new Error(
+        `Invalid recipient for a withdrawal: ${recipient}. Only borrowed VUSD can go to the stability pool.`,
+      );
+    }
+    if (accountObjId !== undefined && !isValidIotaObjectId(normalizeIotaAddress(accountObjId))) {
+      throw new Error(`Invalid accountObjId: ${accountObjId}`);
+    }
 
     const scratch = new VirtueClient({
       network: this.network,
@@ -1754,7 +1777,9 @@ export class VirtueClient {
         { cause: error },
       );
     }
-    return inspect.effects.status.status === "success";
+    return inspect.effects.status.status === "success"
+      ? { ok: true }
+      : { ok: false, rejection: inspect.effects.status.error ?? "unknown abort" };
   }
 
   /**
@@ -1810,15 +1835,24 @@ export class VirtueClient {
       ]);
       if (await this.canPriceCollateral(collateralSymbol, prepared)) {
         price = prepared;
-      } else if (await this.canWithdrawWithoutPrice(inputs)) {
+      } else {
+        const withoutPrice = await this.canWithdrawWithoutPrice(inputs);
+        if (!withoutPrice.ok) {
+          throw noPriceError(collateralSymbol, withoutPrice.rejection);
+        }
+        // The probe vouched for an otherwise empty transaction. Another build on
+        // this client may have written to it while the probe was in flight, and
+        // a borrow on this position, say, would change what the withdrawal
+        // executes against: check again right before writing.
+        if (this.transaction.getData().commands.length > 0) {
+          throw noPriceError(collateralSymbol);
+        }
         // A debt-free position must not be locked in by an oracle outage.
         price = "none";
-      } else {
-        throw noPriceError(collateralSymbol);
       }
     }
     this.transaction.setSender(this.sender);
-    return await this.buildManagePosition(inputs, price);
+    return await this.buildManagePosition(inputs, price ?? null);
   }
 
   /**
@@ -1837,10 +1871,12 @@ export class VirtueClient {
       keepTransaction?: boolean;
     },
     /**
-     * The settled price for a borrow or withdrawal: the prepared oracle data, or
-     * `"none"` for a withdrawal already shown to need no price.
+     * The settled price: the prepared oracle data for a borrow or withdrawal,
+     * `"none"` for a withdrawal already shown to need no price, or `null` when
+     * the operation needs no price at all (deposit, repay). Required: a borrow
+     * or withdrawal given `null` throws rather than fetch a price here.
      */
-    price?: PreparedOracleUpdates | "none",
+    price: PreparedOracleUpdates | "none" | null,
   ): Promise<Transaction> {
     const {
       collateralSymbol,
@@ -1866,7 +1902,7 @@ export class VirtueClient {
       // `option::none`, and building a borrow as though no price check were
       // needed is far worse than throwing on a partially built transaction.
       const priceResult =
-        price === undefined || price === "none"
+        price === null || price === "none"
           ? undefined
           : this.aggregatePricesWith(price, this.transaction, [
               collateralSymbol,
