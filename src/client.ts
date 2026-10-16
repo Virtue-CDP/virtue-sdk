@@ -830,8 +830,12 @@ export class VirtueClient {
     // return the rest. Because it claims the whole balance it cannot share a
     // transaction with another `coinWithBalance` of the same coin (their
     // totals are summed). Close position sizes its VUSD from the debt instead.
+    // The intent picks coins from the transaction's sender, so read that
+    // account's balance. It is the balance as of now: if it drops before the
+    // transaction is built, or some of those coins are inputs elsewhere in it,
+    // the build fails with "Not enough coins of type ...".
     const { totalBalance } = await this.iotaClient.getBalance({
-      owner: this.sender,
+      owner: tx.getData().sender ?? this.sender,
       coinType,
     });
     if (BigInt(totalBalance) === 0n) {
@@ -1995,17 +1999,24 @@ export class VirtueClient {
     if (!this.sender) throw new Error("Sender is not set");
     // The repayment is the debt as read on chain at execution. Its VUSD is sized
     // from the debt read now, plus headroom for interest accrued meanwhile
-    // (0.1% + 0.001 VUSD), capped at what the wallet holds, rather than taking
-    // the whole balance, so another VUSD intent can share the transaction.
+    // (0.1% + 0.001 VUSD), capped at what the wallet holds. When the wallet
+    // holds more than that, another VUSD intent can share the transaction;
+    // when the cap applies, the budget is the whole balance and it cannot
+    // (`coinWithBalance` sums the intents of a type).
     const vusdType = this.config.COIN_TYPES.VUSD;
-    const position = (await this.getDebtorPositions(this.sender)).find(
-      (p) => p.collateral === collateralSymbol,
-    );
-    const debtNow = BigInt(position?.debtAmount ?? "0");
-    const { totalBalance } = await this.iotaClient.getBalance({
-      owner: this.sender,
-      coinType: vusdType,
-    });
+    const [positions, { totalBalance }] = await Promise.all([
+      this.getDebtorPositions(this.sender),
+      this.iotaClient.getBalance({ owner: this.sender, coinType: vusdType }),
+    ]);
+    // `getDebtorPositions` returns nothing when its read fails; that is not a
+    // zero debt, and sizing for one would only abort on chain.
+    const position = positions.find((p) => p.collateral === collateralSymbol);
+    if (!position) {
+      throw new Error(
+        `Could not read the ${collateralSymbol} position to size its repayment.`,
+      );
+    }
+    const debtNow = BigInt(position.debtAmount);
     const headroom = debtNow + debtNow / 1000n + 1000n;
     const repaymentBudget =
       headroom < BigInt(totalBalance) ? headroom : BigInt(totalBalance);

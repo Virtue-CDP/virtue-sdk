@@ -1085,7 +1085,7 @@ var VirtueClient = class _VirtueClient {
       return out2;
     }
     const { totalBalance } = await this.iotaClient.getBalance({
-      owner: this.sender,
+      owner: tx.getData().sender ?? this.sender,
       coinType
     });
     if (BigInt(totalBalance) === 0n) {
@@ -2010,14 +2010,17 @@ var VirtueClient = class _VirtueClient {
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     const vusdType = this.config.COIN_TYPES.VUSD;
-    const position = (await this.getDebtorPositions(this.sender)).find(
-      (p) => p.collateral === collateralSymbol
-    );
-    const debtNow = BigInt(position?.debtAmount ?? "0");
-    const { totalBalance } = await this.iotaClient.getBalance({
-      owner: this.sender,
-      coinType: vusdType
-    });
+    const [positions, { totalBalance }] = await Promise.all([
+      this.getDebtorPositions(this.sender),
+      this.iotaClient.getBalance({ owner: this.sender, coinType: vusdType })
+    ]);
+    const position = positions.find((p) => p.collateral === collateralSymbol);
+    if (!position) {
+      throw new Error(
+        `Could not read the ${collateralSymbol} position to size its repayment.`
+      );
+    }
+    const debtNow = BigInt(position.debtAmount);
     const headroom = debtNow + debtNow / 1000n + 1000n;
     const repaymentBudget = headroom < BigInt(totalBalance) ? headroom : BigInt(totalBalance);
     this.transaction.setSender(this.sender);
