@@ -1575,6 +1575,30 @@ var VirtueClient = class {
   }
   /* ----- Transaction Methods ----- */
   /**
+   * @description The debtor's current debt on `collateralSymbol`, interest
+   * included, read with `vault::try_get_position_data`. A position that does not
+   * exist has no debt. Transport failures propagate.
+   */
+  async currentDebt(collateralSymbol, accountObjId) {
+    const debtor = _nullishCoalesce(accountObjId, () => ( this.sender));
+    const tx = new (0, _transactions.Transaction)();
+    tx.moveCall({
+      target: `${this.config.CDP_PACKAGE_ID}::vault::try_get_position_data`,
+      typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
+      arguments: [
+        tx.sharedObjectRef(this.config.VAULT_MAP[collateralSymbol].vault),
+        tx.pure.address(debtor),
+        tx.sharedObjectRef(this.config.CLOCK_OBJ)
+      ]
+    });
+    const res = await this.iotaClient.devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: DUMMY_ADDRESS
+    });
+    const debtReturn = _optionalChain([res, 'access', _37 => _37.results, 'optionalAccess', _38 => _38[0], 'optionalAccess', _39 => _39.returnValues, 'optionalAccess', _40 => _40[1]]);
+    return debtReturn ? BigInt(_bcs.bcs.u64().parse(Uint8Array.from(debtReturn[0]))) : 0n;
+  }
+  /**
    * @description build and return Transaction of manage position
    * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
    * @param depositAmount: how much amount to deposit (collateral)
@@ -1602,24 +1626,29 @@ var VirtueClient = class {
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
     let prepared;
+    let withoutPrice = false;
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       prepared = await this.prepareOracleUpdates([
         basicSymbolOf(collateralSymbol)
       ]);
       if (!await this.canPriceCollateral(collateralSymbol, prepared)) {
-        throw new Error(
-          `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`
-        );
+        withoutPrice = Number(borrowAmount) === 0 && await this.currentDebt(collateralSymbol, inputs.accountObjId) === 0n;
+        if (!withoutPrice) {
+          throw new Error(
+            `No oracle rule could price ${collateralSymbol}: borrowing, and withdrawing while in debt, require a price.`
+          );
+        }
+        prepared = void 0;
       }
     }
     this.transaction.setSender(this.sender);
-    return await this.buildManagePosition(inputs, prepared);
+    return await this.buildManagePosition(inputs, prepared, withoutPrice);
   }
   /**
    * @description The body of `buildManagePositionTransaction`, split out so the
    * entry point above can settle its preconditions before anything is written.
    */
-  async buildManagePosition(inputs, prepared) {
+  async buildManagePosition(inputs, prepared, withoutPrice = false) {
     const {
       collateralSymbol,
       depositAmount,
@@ -1636,13 +1665,14 @@ var VirtueClient = class {
     );
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      const priceResults = this.aggregatePricesWith(
-        await _asyncNullishCoalesce(prepared, async () => ( await this.prepareOracleUpdates([basicSymbolOf(collateralSymbol)]))),
+      const priceResult = withoutPrice ? void 0 : this.aggregatePricesWith(
+        await _asyncNullishCoalesce(prepared, async () => ( await this.prepareOracleUpdates([
+          basicSymbolOf(collateralSymbol)
+        ]))),
         this.transaction,
         [collateralSymbol]
-      );
-      const priceResult = priceResults[collateralSymbol];
-      if (!priceResult) {
+      )[collateralSymbol];
+      if (!priceResult && !withoutPrice) {
         throw new Error(
           `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`
         );

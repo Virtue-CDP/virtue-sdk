@@ -296,6 +296,65 @@ describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
     expect(calls).toContain("pyth_lazer_rule::feed");
   }, 90_000);
 
+  /**
+   * The vault only checks the collateral ratio for a borrow or for a withdrawal
+   * that leaves debt behind, so a debt-free position must not be locked in by an
+   * oracle outage.
+   */
+  it("withdraws a debt-free position without a price", async () => {
+    breakLazer("reject");
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
+    vi.spyOn(client as any, "currentDebt").mockResolvedValue(0n);
+    const tx = await client.buildManagePositionTransaction({
+      collateralSymbol: "iBTC",
+      depositAmount: "0",
+      borrowAmount: "0",
+      repaymentAmount: "0",
+      withdrawAmount: "1000",
+    });
+    const calls = moveCallsOf(tx);
+    expect(calls).toContain("vault::update_position");
+    expect(calls).toContain("option::none");
+    expect(calls).not.toContain("aggregater::aggregate");
+    expect(calls).not.toContain("pyth_lazer::parse_and_verify_le_ecdsa_update");
+  }, 90_000);
+
+  it("still refuses to withdraw without a price while in debt", async () => {
+    breakLazer("reject");
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
+    vi.spyOn(client as any, "currentDebt").mockResolvedValue(1n);
+    await expect(
+      client.buildManagePositionTransaction({
+        collateralSymbol: "iBTC",
+        depositAmount: "0",
+        borrowAmount: "0",
+        repaymentAmount: "0",
+        withdrawAmount: "1000",
+      }),
+    ).rejects.toThrow(/No oracle rule could price/);
+  }, 90_000);
+
+  it("never borrows without a price, even debt-free", async () => {
+    breakLazer("reject");
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
+    vi.spyOn(client as any, "currentDebt").mockResolvedValue(0n);
+    await expect(
+      client.buildManagePositionTransaction({
+        collateralSymbol: "iBTC",
+        depositAmount: "0",
+        borrowAmount: "10000",
+        repaymentAmount: "0",
+        withdrawAmount: "0",
+      }),
+    ).rejects.toThrow(/No oracle rule could price/);
+  }, 90_000);
+
+  it("reads a real position's debt", async () => {
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
+    // A wallet with no iBTC position has no debt there.
+    await expect((client as any).currentDebt("iBTC")).resolves.toBe(0n);
+  }, 90_000);
+
   it("omits collaterals it cannot price rather than reporting them as zero", async () => {
     breakLazer("reject");
     const client = new VirtueClient({ pythLazer });

@@ -546,6 +546,12 @@ declare class VirtueClient {
      */
     checkResponseForStabilityPool(response: TransactionArgument): void;
     /**
+     * @description The debtor's current debt on `collateralSymbol`, interest
+     * included, read with `vault::try_get_position_data`. A position that does not
+     * exist has no debt. Transport failures propagate.
+     */
+    private currentDebt;
+    /**
      * @description build and return Transaction of manage position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
      * @param depositAmount: how much amount to deposit (collateral)
