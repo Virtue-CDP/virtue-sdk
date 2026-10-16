@@ -430,10 +430,12 @@ export class VirtueClient {
       swapOutFeeRate: Number(feeConfig.swap_out_fee_rate.fields.value) / 1e9,
     });
 
+    // Pools are independent, like collateral prices: one that can't be read is
+    // left out (never reported as empty), and only all of them failing throws.
     const result: PsmPoolInfoList = {};
     pools.forEach(([coin, info], i) => {
       const fields = getObjectFields(poolRes[i]);
-      if (!fields) throw new Error(`Could not read the PSM pool for ${coin}`);
+      if (!fields) return;
       result[coin] = {
         coin,
         coinType: info!.coinType,
@@ -451,6 +453,9 @@ export class VirtueClient {
         moduleVusdSupply: supply.toString(),
       };
     });
+    if (Object.keys(result).length === 0) {
+      throw new Error("Could not read any PSM pool");
+    }
     return result;
   }
 
@@ -768,10 +773,22 @@ export class VirtueClient {
       ? amounts.reduce((sum, a) => sum + BigInt(a as string), 0n)
       : undefined;
     if (total === 0n) {
-      return this.transaction.moveCall({
+      const zero = this.transaction.moveCall({
         target: "0x2::coin::zero",
         typeArguments: [coinType],
       });
+      if (amounts.length <= 1) return zero;
+      // One zero coin per amount, as a real split would return.
+      const out = this.transaction.splitCoins(
+        zero,
+        amounts.map(() => this.transaction.pure.u64(0)),
+      );
+      this.transaction.moveCall({
+        target: "0x2::coin::destroy_zero",
+        typeArguments: [coinType],
+        arguments: [zero],
+      });
+      return out;
     }
 
     // `getCoins` is paginated: read until the coins cover the total, or all of

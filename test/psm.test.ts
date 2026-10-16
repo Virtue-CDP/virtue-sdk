@@ -126,6 +126,21 @@ describe("PSM on chain", () => {
     await expect(other.getPsmPools()).rejects.toThrow(/no supply entry/);
   });
 
+  it("splits one zero coin per amount", async () => {
+    client.resetTransaction();
+    const usdt0 = client.config.PSM_POOLS!.USDT0!.coinType;
+    const [a, b] = await client.splitCoinsByType(usdt0, "0", "0");
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+    client.getTransaction().transferObjects([a, b], walletAddress);
+    const res = await client.getIotaClient().devInspectTransactionBlock({
+      transactionBlock: client.getTransaction(),
+      sender: walletAddress,
+    });
+    expect(res.effects.status.status).toBe("success");
+    client.resetTransaction();
+  });
+
   it("rejects a zero amount before writing anything", async () => {
     client.resetTransaction();
     await expect(
@@ -140,14 +155,19 @@ describe("PSM on chain", () => {
   });
 
   it("leaves a kept transaction untouched when the balance is short", async () => {
-    // The test wallet holds no USDT0, so the coin read fails; nothing of the
-    // swap (the partner request included) may have been written by then.
+    // Ask for one unit more than the wallet holds, so the balance check fails
+    // whatever it holds; nothing of the swap (the partner request included)
+    // may have been written by then.
+    const usdt0 = await client.getIotaClient().getBalance({
+      owner: walletAddress,
+      coinType: client.config.PSM_POOLS!.USDT0!.coinType,
+    });
     client.resetTransaction();
     await expect(
       client.buildPsmSwapTransaction({
         coin: "USDT0",
         direction: "in",
-        amount: "1",
+        amount: (BigInt(usdt0.totalBalance) + 1n).toString(),
         accountObj: walletAddress,
         keepTransaction: true,
       }),
@@ -177,17 +197,15 @@ describe("PSM on chain", () => {
     expect(res.effects.status.status).toBe("success");
   });
 
-  it("builds a swap out that the chain judges against the pool", async () => {
+  it("builds a swap out that the chain judges against the pool", async (ctx) => {
     const amount = 1_000_000n;
-    const vusd = await client
-      .getIotaClient()
-      .getBalance({
-        owner: walletAddress,
-        coinType: client.config.COIN_TYPES.VUSD,
-      });
+    const vusd = await client.getIotaClient().getBalance({
+      owner: walletAddress,
+      coinType: client.config.COIN_TYPES.VUSD,
+    });
     // Without 1 VUSD in the test wallet the build fails for a reason that has
     // nothing to do with the pool, so there is nothing to judge.
-    if (BigInt(vusd.totalBalance) < amount) return;
+    if (BigInt(vusd.totalBalance) < amount) return ctx.skip();
 
     const { USDT0 } = await client.getPsmPools();
     const covered = quotePsmSwap(USDT0!, "out", amount).error === undefined;

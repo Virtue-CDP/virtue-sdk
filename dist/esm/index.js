@@ -765,7 +765,7 @@ var VirtueClient = class _VirtueClient {
     const result = {};
     pools.forEach(([coin, info], i) => {
       const fields = getObjectFields(poolRes[i]);
-      if (!fields) throw new Error(`Could not read the PSM pool for ${coin}`);
+      if (!fields) return;
       result[coin] = {
         coin,
         coinType: info.coinType,
@@ -783,6 +783,9 @@ var VirtueClient = class _VirtueClient {
         moduleVusdSupply: supply.toString()
       };
     });
+    if (Object.keys(result).length === 0) {
+      throw new Error("Could not read any PSM pool");
+    }
     return result;
   }
   /**
@@ -1046,10 +1049,21 @@ var VirtueClient = class _VirtueClient {
   async splitCoinsByType(coinType, ...amounts) {
     const total = amounts.every((a) => typeof a === "string") ? amounts.reduce((sum, a) => sum + BigInt(a), 0n) : void 0;
     if (total === 0n) {
-      return this.transaction.moveCall({
+      const zero = this.transaction.moveCall({
         target: "0x2::coin::zero",
         typeArguments: [coinType]
       });
+      if (amounts.length <= 1) return zero;
+      const out2 = this.transaction.splitCoins(
+        zero,
+        amounts.map(() => this.transaction.pure.u64(0))
+      );
+      this.transaction.moveCall({
+        target: "0x2::coin::destroy_zero",
+        typeArguments: [coinType],
+        arguments: [zero]
+      });
+      return out2;
     }
     const userCoins = [];
     let held = 0n;
