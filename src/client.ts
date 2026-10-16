@@ -480,12 +480,16 @@ export class VirtueClient {
     if (accountAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid account address");
     }
+    // `getDynamicFieldObject` is the V2 RPC since @iota/iota-sdk 1.10, which
+    // returns no content unless asked: without `showContent` every balance
+    // would read as zero.
     const res = await this.iotaClient.getDynamicFieldObject({
-      parentId: this.config.STABILITY_POOL_TABLE_ID,
+      parentObjectId: this.config.STABILITY_POOL_TABLE_ID,
       name: {
         type: "address",
         value: accountAddr,
       },
+      options: { showContent: true },
     });
     const collBalances: Partial<Record<COLLATERAL_COIN, number>> = {};
     Object.keys(this.config.VAULT_MAP).map((collSymbol) => {

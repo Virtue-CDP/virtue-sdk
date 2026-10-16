@@ -800,11 +800,12 @@ var VirtueClient = class _VirtueClient {
       throw new Error("Invalid account address");
     }
     const res = await this.iotaClient.getDynamicFieldObject({
-      parentId: this.config.STABILITY_POOL_TABLE_ID,
+      parentObjectId: this.config.STABILITY_POOL_TABLE_ID,
       name: {
         type: "address",
         value: accountAddr
-      }
+      },
+      options: { showContent: true }
     });
     const collBalances = {};
     Object.keys(this.config.VAULT_MAP).map((collSymbol) => {
