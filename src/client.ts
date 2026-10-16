@@ -2010,10 +2010,10 @@ export class VirtueClient {
     if (!this.sender) throw new Error("Sender is not set");
     // The repayment is the debt as read on chain at execution. Its VUSD is sized
     // from the debt read now, plus headroom for interest accrued meanwhile
-    // (0.1% + 0.001 VUSD), capped at what the wallet holds. When the wallet
-    // holds more than that, another VUSD intent can share the transaction;
-    // when the cap applies, the budget is the whole balance and it cannot
-    // (`coinWithBalance` sums the intents of a type).
+    // (0.1% + 0.001 VUSD). A wallet holding less is refused below, so with debt
+    // the budget is always the headroom, and VUSD left over beyond it can serve
+    // another intent in the transaction (`coinWithBalance` sums the intents of
+    // a type). Only a debt-free position is capped at what the wallet holds.
     const vusdType = this.config.COIN_TYPES.VUSD;
     const [positions, { totalBalance }] = await Promise.all([
       this.getDebtorPositions(this.sender),
