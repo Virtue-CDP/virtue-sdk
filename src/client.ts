@@ -124,27 +124,52 @@ const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
 const DUMMY_ADDRESS = normalizeIotaAddress("0x0");
 
 /**
- * Most coins of one type a single split will read and merge. Keeps a dust-heavy
- * wallet from costing unbounded RPC reads, and the merge well inside the PTB's
- * 2048 input objects and 128 KiB size.
+ * Most coins of one type a single split will merge: well inside the PTB's 2048
+ * input objects and 128 KiB size.
  */
 const MAX_COINS_PER_SPLIT = 500;
+
+/**
+ * Most coins of one type read while looking for enough to cover an amount
+ * (20 pages). Reading past the merge cap lets the largest coins be picked even
+ * when dust comes first in page order, while bounding the RPC cost.
+ */
+const MAX_COINS_READ = 1_000;
 
 /** Sources per `mergeCoins` command, under the 512-argument limit per command. */
 const MERGE_CHUNK = 255;
 
 /** Coins chosen for a split, read up front so writing them cannot fail. */
 type CoinRef = { objectId: string; version: string; digest: string };
+type HeldCoin = CoinRef & { balance: bigint };
 type InputCoins =
   | { kind: "zero"; coinType: string; count: number }
   | { kind: "gas" }
   | { kind: "coins"; refs: CoinRef[] };
 
-/** The sum of the amounts, or `undefined` when one is only known on chain. */
-const knownTotal = (amounts: (string | TransactionArgument)[]) =>
-  amounts.every((a) => typeof a === "string")
-    ? amounts.reduce((sum, a) => sum + BigInt(a as string), 0n)
-    : undefined;
+/**
+ * Headroom over a debt read off chain, for the interest it accrues before the
+ * close executes: 0.1% plus 0.001 VUSD. At the vaults' ~5.5% a year, 0.1% is
+ * about a week of interest; the minutes before a close executes are far less.
+ */
+const closeDebtMargin = (debt: bigint) => debt / 1000n + 1000n;
+
+/**
+ * The sum of the amounts, or `undefined` when one is only known on chain.
+ * Amounts are raw units: a non-integer string ("1e9", "1000.0") is rejected
+ * here with a clear message rather than as a bare BigInt SyntaxError.
+ */
+const knownTotal = (amounts: (string | TransactionArgument)[]) => {
+  if (!amounts.every((a) => typeof a === "string")) return undefined;
+  return amounts.reduce((sum, a) => {
+    if (!/^\d+$/.test(a as string)) {
+      throw new Error(
+        `Invalid amount "${a as string}": amounts are non-negative integers of raw units.`,
+      );
+    }
+    return sum + BigInt(a as string);
+  }, 0n);
+};
 
 /** A `TypeName` as the treasury stores it: no `0x`, address padded to 64 hex. */
 const normalizeTypeName = (type: string): string => {
@@ -780,12 +805,37 @@ export class VirtueClient {
     coinSymbol: COIN,
     ...amounts: (string | TransactionArgument)[]
   ): Promise<InputCoins> {
-    const coinType = this.config.COIN_TYPES[coinSymbol];
-    if (knownTotal(amounts) === 0n) {
-      return { kind: "zero", coinType, count: amounts.length };
+    if (coinSymbol === "IOTA") {
+      return knownTotal(amounts) === 0n
+        ? {
+            kind: "zero",
+            coinType: this.config.COIN_TYPES.IOTA,
+            count: amounts.length,
+          }
+        : { kind: "gas" };
     }
-    if (coinSymbol === "IOTA") return { kind: "gas" };
-    return this.selectCoins(coinType, amounts);
+    return this.selectCoinsOfType(this.config.COIN_TYPES[coinSymbol], amounts);
+  }
+
+  /**
+   * @description Coin selection for any non-IOTA coin type: a zero coin for a
+   * zero total, otherwise the sender's coins. The one place the zero rule lives.
+   */
+  private async selectCoinsOfType(
+    coinType: string,
+    amounts: (string | TransactionArgument)[],
+    bounds?: { atLeast: bigint; prefer: bigint },
+  ): Promise<InputCoins> {
+    // With bounds the amount is only known on chain and the bounds alone
+    // decide; the listed amounts (often none) say nothing about it.
+    if (bounds) {
+      return bounds.atLeast === 0n
+        ? { kind: "zero", coinType, count: amounts.length }
+        : this.selectCoins(coinType, undefined, bounds);
+    }
+    const total = knownTotal(amounts);
+    if (total === 0n) return { kind: "zero", coinType, count: amounts.length };
+    return this.selectCoins(coinType, total);
   }
 
   /**
@@ -834,59 +884,110 @@ export class VirtueClient {
   }
 
   /**
-   * @description Read the sender's coins of `coinType` until they cover the
-   * amounts, at most `MAX_COINS_PER_SPLIT` of them.
+   * @description Choose the sender's coins of `coinType` to cover a split.
    *
-   * `getCoins` is paginated. With a known total, reading stops as soon as the
-   * coins cover it. With a total only known on chain (an amount given as a
-   * transaction argument), every coin is read, up to the cap. Past the cap the
-   * wallet is too fragmented to merge in one transaction, and that is thrown
-   * rather than building one that fails: merge the coins first.
+   * Whole pages are read until the coins read cover the amount, up to
+   * `MAX_COINS_READ`, and then the fewest, largest coins that cover it are
+   * taken, at most `MAX_COINS_PER_SPLIT`. Page order is not value order, so
+   * picking by size is what lets dust listed ahead of one large coin still
+   * build.
+   *
+   * `bounds` is for an amount only known on chain but estimable off chain (a
+   * debt that accrues interest): `prefer` is covered when the wallet can, and
+   * `atLeast` is the floor below which there is not enough balance. With no
+   * bounds and no known total, every coin must be read and merged, and a wallet
+   * past the merge cap is refused.
+   *
+   * Throws rather than build a transaction that would fail: "Not enough
+   * balance", or "Too many ... coins" for a wallet too fragmented for one
+   * transaction, which should merge its coins first.
    */
   private async selectCoins(
     coinType: string,
-    amounts: (string | TransactionArgument)[],
+    total: bigint | undefined,
+    bounds?: { atLeast: bigint; prefer: bigint },
   ): Promise<InputCoins> {
-    const total = knownTotal(amounts);
-    const refs: CoinRef[] = [];
-    let held = 0n;
+    const target = bounds?.prefer ?? total;
+    const floor = bounds?.atLeast ?? total;
+    const held: HeldCoin[] = [];
+    let sum = 0n;
     let cursor: string | null | undefined = undefined;
-    let more = true;
-    while (more && refs.length < MAX_COINS_PER_SPLIT) {
-      if (total !== undefined && refs.length > 0 && held >= total) break;
+    let unread = true;
+    // One stop predicate: coins left to read, under the read limit, and the
+    // amount (when known) not yet covered. Whole pages, so nothing read is
+    // ever dropped.
+    while (
+      unread &&
+      held.length < MAX_COINS_READ &&
+      (target === undefined || sum < target)
+    ) {
       const page = await this.iotaClient.getCoins({
         owner: this.sender,
         coinType,
         cursor,
       });
       for (const coin of page.data) {
-        if (refs.length >= MAX_COINS_PER_SPLIT) break;
-        if (total !== undefined && refs.length > 0 && held >= total) break;
-        refs.push({
+        held.push({
           objectId: coin.coinObjectId,
           version: coin.version,
           digest: coin.digest,
+          balance: BigInt(coin.balance),
         });
-        held += BigInt(coin.balance);
+        sum += BigInt(coin.balance);
       }
       cursor = page.nextCursor;
-      more = page.hasNextPage && !!cursor;
+      unread = page.hasNextPage && !!cursor;
     }
 
-    if (refs.length === 0 || (total !== undefined && held < total)) {
-      if (refs.length >= MAX_COINS_PER_SPLIT && more) {
-        throw new Error(
-          `Too many ${coinType} coins to merge in one transaction: the first ${MAX_COINS_PER_SPLIT} do not cover the amount. Merge them first.`,
+    const tooFragmented = (detail: string) =>
+      new Error(
+        `Too many ${coinType} coins to merge in one transaction: ${detail}. Merge them first.`,
+      );
+
+    if (target === undefined) {
+      // Only known on chain: every coin has to go in.
+      if (unread || held.length > MAX_COINS_PER_SPLIT) {
+        throw tooFragmented(
+          `the amount is only known on chain and the wallet holds over ${MAX_COINS_PER_SPLIT}`,
+        );
+      }
+      if (held.length === 0) throw new Error("Not enough balance");
+      return { kind: "coins", refs: held };
+    }
+
+    if (sum < floor!) {
+      if (unread) {
+        throw tooFragmented(
+          `the first ${MAX_COINS_READ} do not cover the amount`,
         );
       }
       throw new Error("Not enough balance");
     }
-    if (total === undefined && more) {
-      throw new Error(
-        `Too many ${coinType} coins to merge in one transaction (over ${MAX_COINS_PER_SPLIT}), and the amount is only known on chain. Merge them first.`,
+
+    // Largest first, and only as many as cover the target (or, when the
+    // wallet cannot reach the preferred target, everything read).
+    held.sort((a, b) => (a.balance === b.balance ? 0 : a.balance > b.balance ? -1 : 1));
+    const goal = sum >= target ? target : floor!;
+    const chosen: HeldCoin[] = [];
+    let covered = 0n;
+    for (const coin of held) {
+      if (covered >= goal) break;
+      chosen.push(coin);
+      covered += coin.balance;
+    }
+    if (chosen.length > MAX_COINS_PER_SPLIT) {
+      throw tooFragmented(
+        `covering the amount takes ${chosen.length} coins, over ${MAX_COINS_PER_SPLIT}`,
       );
     }
-    return { kind: "coins", refs };
+    return {
+      kind: "coins",
+      refs: chosen.map(({ objectId, version, digest }) => ({
+        objectId,
+        version,
+        digest,
+      })),
+    };
   }
 
   /**
@@ -899,10 +1000,7 @@ export class VirtueClient {
     coinType: string,
     ...amounts: (string | TransactionArgument)[]
   ): Promise<TransactionResult> {
-    const coins: InputCoins =
-      knownTotal(amounts) === 0n
-        ? { kind: "zero", coinType, count: amounts.length }
-        : await this.selectCoins(coinType, amounts);
+    const coins = await this.selectCoinsOfType(coinType, amounts);
     return this.writeInputCoins(coins, amounts);
   }
 
@@ -1881,6 +1979,12 @@ export class VirtueClient {
     // change the identity the caller is composing against and drop that
     // instance's plugins and intent resolvers. So the one question that can fail
     // the build is asked up front, while the transaction is still untouched.
+    //
+    // Coins are selected first: their reads can be slow (paginated, for a
+    // fragmented wallet), and running them before the Lazer fetch keeps them
+    // out of the signed update's freshness window. The two are independent, so
+    // they run together.
+    const coins = await this.selectPositionCoins(inputs);
     let price: PreparedOracleUpdates | "none" | undefined;
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       // Only the price this position needs: an IOTA borrow fetches and writes
@@ -1898,7 +2002,9 @@ export class VirtueClient {
         // The probe vouched for an otherwise empty transaction. Another build on
         // this client may have written to it while the probe was in flight, and
         // a borrow on this position, say, would change what the withdrawal
-        // executes against: check again right before writing.
+        // executes against: check again right before writing. Nothing is
+        // awaited between here and the first write, since the coins are
+        // already selected.
         if (this.transaction.getData().commands.length > 0) {
           throw noPriceError(collateralSymbol);
         }
@@ -1907,7 +2013,25 @@ export class VirtueClient {
       }
     }
     this.transaction.setSender(this.sender);
-    return await this.buildManagePosition(inputs, price ?? null);
+    return await this.buildManagePosition(inputs, price ?? null, coins);
+  }
+
+  /**
+   * @description Select a position build's deposit and repayment coins: every
+   * read and balance check, nothing written. Both settle before either is
+   * written, so a shortfall on one cannot leave the other's merge and split in
+   * a kept transaction.
+   */
+  private async selectPositionCoins(inputs: {
+    collateralSymbol: COLLATERAL_COIN;
+    depositAmount: string;
+    repaymentAmount: string;
+  }): Promise<{ deposit: InputCoins; repayment: InputCoins }> {
+    const [deposit, repayment] = await Promise.all([
+      this.selectInputCoins(inputs.collateralSymbol, inputs.depositAmount),
+      this.selectInputCoins("VUSD", inputs.repaymentAmount),
+    ]);
+    return { deposit, repayment };
   }
 
   /**
@@ -1932,6 +2056,8 @@ export class VirtueClient {
      * or withdrawal given `null` throws rather than fetch a price here.
      */
     price: PreparedOracleUpdates | "none" | null,
+    /** Coins already selected by the caller; selected here when absent. */
+    coins?: { deposit: InputCoins; repayment: InputCoins },
   ): Promise<Transaction> {
     const {
       collateralSymbol,
@@ -1943,18 +2069,10 @@ export class VirtueClient {
       recipient,
       keepTransaction,
     } = inputs;
-    // Both coin selections can fail (reads, balances), so both are settled
-    // before either is written: a failure on the second must not leave the
-    // first's merge and split in a kept transaction.
-    const depositCoins = await this.selectInputCoins(
-      collateralSymbol,
-      depositAmount,
-    );
-    const repaymentCoins = await this.selectInputCoins("VUSD", repaymentAmount);
-    const [depositCoin] = this.writeInputCoins(depositCoins, [depositAmount]);
-    const [repaymentCoin] = this.writeInputCoins(repaymentCoins, [
-      repaymentAmount,
-    ]);
+    const { deposit, repayment } =
+      coins ?? (await this.selectPositionCoins(inputs));
+    const [depositCoin] = this.writeInputCoins(deposit, [depositAmount]);
+    const [repaymentCoin] = this.writeInputCoins(repayment, [repaymentAmount]);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       // The same data the precondition was settled from, so the answer here
       // cannot differ from the one already acted on.
@@ -2061,6 +2179,21 @@ export class VirtueClient {
       inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
+    // The repayment is the debt as read on chain at execution, but the coins
+    // to cover it are chosen now, from the debt read off chain, and before
+    // anything is written: a shortfall or a too-fragmented wallet must not
+    // leave the position read below dangling in a kept transaction. The debt
+    // accrues interest between now and execution, so the coins aim a little
+    // above it (CLOSE_DEBT_MARGIN) when the wallet can.
+    const position = (await this.getDebtorPositions(this.sender)).find(
+      (p) => p.collateral === collateralSymbol,
+    );
+    const debtNow = BigInt(position?.debtAmount ?? "0");
+    const repaymentCoins = await this.selectCoinsOfType(
+      this.config.COIN_TYPES.VUSD,
+      [],
+      { atLeast: debtNow, prefer: debtNow + closeDebtMargin(debtNow) },
+    );
     this.transaction.setSender(this.sender);
     const collType = this.config.COIN_TYPES[collateralSymbol];
     const [collAmount, debtAmount] = this.transaction.moveCall({
@@ -2072,7 +2205,7 @@ export class VirtueClient {
         this.transaction.object.clock(),
       ],
     });
-    const repaymentCoin = await this.splitInputCoins("VUSD", debtAmount);
+    const [repaymentCoin] = this.writeInputCoins(repaymentCoins, [debtAmount]);
     let updateRequest = this.debtorRequest({
       collateralSymbol,
       depositCoin: this.zeroCoin(collateralSymbol),

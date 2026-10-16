@@ -1,4 +1,4 @@
-"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _nullishCoalesce(lhs, rhsFn) { if (lhs != null) { return lhs; } else { return rhsFn(); } } function _optionalChain(ops) { let lastAccessLHS = undefined; let value = ops[0]; let i = 1; while (i < ops.length) { const op = ops[i]; const fn = ops[i + 1]; i += 2; if ((op === 'optionalAccess' || op === 'optionalCall') && value == null) { return undefined; } if (op === 'access' || op === 'optionalAccess') { lastAccessLHS = value; value = fn(value); } else if (op === 'call' || op === 'optionalCall') { value = fn((...args) => value.call(lastAccessLHS, ...args)); lastAccessLHS = undefined; } } return value; }// src/client.ts
+"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _nullishCoalesce(lhs, rhsFn) { if (lhs != null) { return lhs; } else { return rhsFn(); } } async function _asyncNullishCoalesce(lhs, rhsFn) { if (lhs != null) { return lhs; } else { return await rhsFn(); } } function _optionalChain(ops) { let lastAccessLHS = undefined; let value = ops[0]; let i = 1; while (i < ops.length) { const op = ops[i]; const fn = ops[i + 1]; i += 2; if ((op === 'optionalAccess' || op === 'optionalCall') && value == null) { return undefined; } if (op === 'access' || op === 'optionalAccess') { lastAccessLHS = value; value = fn(value); } else if (op === 'call' || op === 'optionalCall') { value = fn((...args) => value.call(lastAccessLHS, ...args)); lastAccessLHS = undefined; } } return value; }// src/client.ts
 
 
 var _transactions = require('@iota/iota-sdk/transactions');
@@ -536,8 +536,20 @@ var getCoinSymbol2 = (coinType, coinTypes) => {
 };
 var DUMMY_ADDRESS = _utils.normalizeIotaAddress.call(void 0, "0x0");
 var MAX_COINS_PER_SPLIT = 500;
+var MAX_COINS_READ = 1e3;
 var MERGE_CHUNK = 255;
-var knownTotal = (amounts) => amounts.every((a) => typeof a === "string") ? amounts.reduce((sum, a) => sum + BigInt(a), 0n) : void 0;
+var closeDebtMargin = (debt) => debt / 1000n + 1000n;
+var knownTotal = (amounts) => {
+  if (!amounts.every((a) => typeof a === "string")) return void 0;
+  return amounts.reduce((sum, a) => {
+    if (!/^\d+$/.test(a)) {
+      throw new Error(
+        `Invalid amount "${a}": amounts are non-negative integers of raw units.`
+      );
+    }
+    return sum + BigInt(a);
+  }, 0n);
+};
 var normalizeTypeName = (type) => {
   const [address, ...rest] = type.split("::");
   return [_utils.normalizeIotaAddress.call(void 0, address).replace(/^0x/, ""), ...rest].join("::");
@@ -1033,12 +1045,26 @@ var VirtueClient = class _VirtueClient {
    * before its first command.
    */
   async selectInputCoins(coinSymbol, ...amounts) {
-    const coinType = this.config.COIN_TYPES[coinSymbol];
-    if (knownTotal(amounts) === 0n) {
-      return { kind: "zero", coinType, count: amounts.length };
+    if (coinSymbol === "IOTA") {
+      return knownTotal(amounts) === 0n ? {
+        kind: "zero",
+        coinType: this.config.COIN_TYPES.IOTA,
+        count: amounts.length
+      } : { kind: "gas" };
     }
-    if (coinSymbol === "IOTA") return { kind: "gas" };
-    return this.selectCoins(coinType, amounts);
+    return this.selectCoinsOfType(this.config.COIN_TYPES[coinSymbol], amounts);
+  }
+  /**
+   * @description Coin selection for any non-IOTA coin type: a zero coin for a
+   * zero total, otherwise the sender's coins. The one place the zero rule lives.
+   */
+  async selectCoinsOfType(coinType, amounts, bounds) {
+    if (bounds) {
+      return bounds.atLeast === 0n ? { kind: "zero", coinType, count: amounts.length } : this.selectCoins(coinType, void 0, bounds);
+    }
+    const total = knownTotal(amounts);
+    if (total === 0n) return { kind: "zero", coinType, count: amounts.length };
+    return this.selectCoins(coinType, total);
   }
   /**
    * @description The writing half of `splitInputCoins`. Pure: no RPC calls, so
@@ -1078,55 +1104,91 @@ var VirtueClient = class _VirtueClient {
     return out;
   }
   /**
-   * @description Read the sender's coins of `coinType` until they cover the
-   * amounts, at most `MAX_COINS_PER_SPLIT` of them.
+   * @description Choose the sender's coins of `coinType` to cover a split.
    *
-   * `getCoins` is paginated. With a known total, reading stops as soon as the
-   * coins cover it. With a total only known on chain (an amount given as a
-   * transaction argument), every coin is read, up to the cap. Past the cap the
-   * wallet is too fragmented to merge in one transaction, and that is thrown
-   * rather than building one that fails: merge the coins first.
+   * Whole pages are read until the coins read cover the amount, up to
+   * `MAX_COINS_READ`, and then the fewest, largest coins that cover it are
+   * taken, at most `MAX_COINS_PER_SPLIT`. Page order is not value order, so
+   * picking by size is what lets dust listed ahead of one large coin still
+   * build.
+   *
+   * `bounds` is for an amount only known on chain but estimable off chain (a
+   * debt that accrues interest): `prefer` is covered when the wallet can, and
+   * `atLeast` is the floor below which there is not enough balance. With no
+   * bounds and no known total, every coin must be read and merged, and a wallet
+   * past the merge cap is refused.
+   *
+   * Throws rather than build a transaction that would fail: "Not enough
+   * balance", or "Too many ... coins" for a wallet too fragmented for one
+   * transaction, which should merge its coins first.
    */
-  async selectCoins(coinType, amounts) {
-    const total = knownTotal(amounts);
-    const refs = [];
-    let held = 0n;
+  async selectCoins(coinType, total, bounds) {
+    const target = _nullishCoalesce(_optionalChain([bounds, 'optionalAccess', _32 => _32.prefer]), () => ( total));
+    const floor = _nullishCoalesce(_optionalChain([bounds, 'optionalAccess', _33 => _33.atLeast]), () => ( total));
+    const held = [];
+    let sum = 0n;
     let cursor = void 0;
-    let more = true;
-    while (more && refs.length < MAX_COINS_PER_SPLIT) {
-      if (total !== void 0 && refs.length > 0 && held >= total) break;
+    let unread = true;
+    while (unread && held.length < MAX_COINS_READ && (target === void 0 || sum < target)) {
       const page = await this.iotaClient.getCoins({
         owner: this.sender,
         coinType,
         cursor
       });
       for (const coin of page.data) {
-        if (refs.length >= MAX_COINS_PER_SPLIT) break;
-        if (total !== void 0 && refs.length > 0 && held >= total) break;
-        refs.push({
+        held.push({
           objectId: coin.coinObjectId,
           version: coin.version,
-          digest: coin.digest
+          digest: coin.digest,
+          balance: BigInt(coin.balance)
         });
-        held += BigInt(coin.balance);
+        sum += BigInt(coin.balance);
       }
       cursor = page.nextCursor;
-      more = page.hasNextPage && !!cursor;
+      unread = page.hasNextPage && !!cursor;
     }
-    if (refs.length === 0 || total !== void 0 && held < total) {
-      if (refs.length >= MAX_COINS_PER_SPLIT && more) {
-        throw new Error(
-          `Too many ${coinType} coins to merge in one transaction: the first ${MAX_COINS_PER_SPLIT} do not cover the amount. Merge them first.`
+    const tooFragmented = (detail) => new Error(
+      `Too many ${coinType} coins to merge in one transaction: ${detail}. Merge them first.`
+    );
+    if (target === void 0) {
+      if (unread || held.length > MAX_COINS_PER_SPLIT) {
+        throw tooFragmented(
+          `the amount is only known on chain and the wallet holds over ${MAX_COINS_PER_SPLIT}`
+        );
+      }
+      if (held.length === 0) throw new Error("Not enough balance");
+      return { kind: "coins", refs: held };
+    }
+    if (sum < floor) {
+      if (unread) {
+        throw tooFragmented(
+          `the first ${MAX_COINS_READ} do not cover the amount`
         );
       }
       throw new Error("Not enough balance");
     }
-    if (total === void 0 && more) {
-      throw new Error(
-        `Too many ${coinType} coins to merge in one transaction (over ${MAX_COINS_PER_SPLIT}), and the amount is only known on chain. Merge them first.`
+    held.sort((a, b) => a.balance === b.balance ? 0 : a.balance > b.balance ? -1 : 1);
+    const goal = sum >= target ? target : floor;
+    const chosen = [];
+    let covered = 0n;
+    for (const coin of held) {
+      if (covered >= goal) break;
+      chosen.push(coin);
+      covered += coin.balance;
+    }
+    if (chosen.length > MAX_COINS_PER_SPLIT) {
+      throw tooFragmented(
+        `covering the amount takes ${chosen.length} coins, over ${MAX_COINS_PER_SPLIT}`
       );
     }
-    return { kind: "coins", refs };
+    return {
+      kind: "coins",
+      refs: chosen.map(({ objectId, version, digest }) => ({
+        objectId,
+        version,
+        digest
+      }))
+    };
   }
   /**
    * @description split the needed coins of any non-IOTA coin type, merging the
@@ -1135,7 +1197,7 @@ var VirtueClient = class _VirtueClient {
    * `Transaction` cannot be rolled back.
    */
   async splitCoinsByType(coinType, ...amounts) {
-    const coins = knownTotal(amounts) === 0n ? { kind: "zero", coinType, count: amounts.length } : await this.selectCoins(coinType, amounts);
+    const coins = await this.selectCoinsOfType(coinType, amounts);
     return this.writeInputCoins(coins, amounts);
   }
   /* ----- Transaction Methods ----- */
@@ -1183,7 +1245,7 @@ var VirtueClient = class _VirtueClient {
   }
   /** The PSM package and `coin`'s pool, or a throw where there is no PSM. */
   psmPool(coin) {
-    const pool = _optionalChain([this, 'access', _32 => _32.config, 'access', _33 => _33.PSM_POOLS, 'optionalAccess', _34 => _34[coin]]);
+    const pool = _optionalChain([this, 'access', _34 => _34.config, 'access', _35 => _35.PSM_POOLS, 'optionalAccess', _36 => _36[coin]]);
     if (!this.config.PSM_PACKAGE_ID || !pool) {
       throw new Error(`No PSM pool for ${coin} on ${this.network}`);
     }
@@ -1330,7 +1392,7 @@ var VirtueClient = class _VirtueClient {
    * of a failed transaction.
    */
   lazerRuleFeeds(symbol) {
-    return _optionalChain([this, 'access', _35 => _35.config, 'access', _36 => _36.PYTH_LAZER_FEED_IDS, 'optionalAccess', _37 => _37[symbol]]) !== void 0 && !!this.config.PYTH_LAZER_PACKAGE_ID && !!this.config.PYTH_LAZER_STATE_OBJ && !!this.config.PYTH_LAZER_RULE_PACKAGE_ID && !!this.config.PYTH_LAZER_RULE_CONFIG_OBJ;
+    return _optionalChain([this, 'access', _37 => _37.config, 'access', _38 => _38.PYTH_LAZER_FEED_IDS, 'optionalAccess', _39 => _39[symbol]]) !== void 0 && !!this.config.PYTH_LAZER_PACKAGE_ID && !!this.config.PYTH_LAZER_STATE_OBJ && !!this.config.PYTH_LAZER_RULE_PACKAGE_ID && !!this.config.PYTH_LAZER_RULE_CONFIG_OBJ;
   }
   /**
    * @description Build the aggregation for `symbols` on a transaction of its own
@@ -1386,7 +1448,7 @@ var VirtueClient = class _VirtueClient {
         { cause: error }
       );
     }
-    return _optionalChain([inspect, 'optionalAccess', _38 => _38.effects, 'access', _39 => _39.status, 'access', _40 => _40.status]) === "success";
+    return _optionalChain([inspect, 'optionalAccess', _40 => _40.effects, 'access', _41 => _41.status, 'access', _42 => _42.status]) === "success";
   }
   /**
    * @description Fetch one signed Lazer update for `feedId`, without touching
@@ -1449,7 +1511,7 @@ var VirtueClient = class _VirtueClient {
    * dApp consumer. `fromHEX` works in both runtimes.
    */
   lazerUpdateFromResponse(body) {
-    const hex = _optionalChain([body, 'optionalAccess', _41 => _41.leEcdsa, 'optionalAccess', _42 => _42.data]);
+    const hex = _optionalChain([body, 'optionalAccess', _43 => _43.leEcdsa, 'optionalAccess', _44 => _44.data]);
     if (typeof hex !== "string" || hex.length === 0) return null;
     try {
       return _utils.fromHEX.call(void 0, hex);
@@ -1490,7 +1552,7 @@ var VirtueClient = class _VirtueClient {
       this.priceableSymbols().map(async (symbol) => {
         try {
           const inspect = await this.inspectAggregation(prepared, [symbol]);
-          return _optionalChain([inspect, 'optionalAccess', _43 => _43.effects, 'access', _44 => _44.status, 'access', _45 => _45.status]) === "success" ? [symbol] : [];
+          return _optionalChain([inspect, 'optionalAccess', _45 => _45.effects, 'access', _46 => _46.status, 'access', _47 => _47.status]) === "success" ? [symbol] : [];
         } catch (e4) {
           return [];
         }
@@ -1923,6 +1985,7 @@ var VirtueClient = class _VirtueClient {
     const { collateralSymbol, borrowAmount, withdrawAmount, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
+    const coins = await this.selectPositionCoins(inputs);
     let price;
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       const prepared = await this.prepareOracleUpdates([
@@ -1942,13 +2005,26 @@ var VirtueClient = class _VirtueClient {
       }
     }
     this.transaction.setSender(this.sender);
-    return await this.buildManagePosition(inputs, _nullishCoalesce(price, () => ( null)));
+    return await this.buildManagePosition(inputs, _nullishCoalesce(price, () => ( null)), coins);
+  }
+  /**
+   * @description Select a position build's deposit and repayment coins: every
+   * read and balance check, nothing written. Both settle before either is
+   * written, so a shortfall on one cannot leave the other's merge and split in
+   * a kept transaction.
+   */
+  async selectPositionCoins(inputs) {
+    const [deposit, repayment] = await Promise.all([
+      this.selectInputCoins(inputs.collateralSymbol, inputs.depositAmount),
+      this.selectInputCoins("VUSD", inputs.repaymentAmount)
+    ]);
+    return { deposit, repayment };
   }
   /**
    * @description The body of `buildManagePositionTransaction`, split out so the
    * entry point above can settle its preconditions before anything is written.
    */
-  async buildManagePosition(inputs, price) {
+  async buildManagePosition(inputs, price, coins) {
     const {
       collateralSymbol,
       depositAmount,
@@ -1959,15 +2035,9 @@ var VirtueClient = class _VirtueClient {
       recipient,
       keepTransaction
     } = inputs;
-    const depositCoins = await this.selectInputCoins(
-      collateralSymbol,
-      depositAmount
-    );
-    const repaymentCoins = await this.selectInputCoins("VUSD", repaymentAmount);
-    const [depositCoin] = this.writeInputCoins(depositCoins, [depositAmount]);
-    const [repaymentCoin] = this.writeInputCoins(repaymentCoins, [
-      repaymentAmount
-    ]);
+    const { deposit, repayment } = await _asyncNullishCoalesce(coins, async () => ( await this.selectPositionCoins(inputs)));
+    const [depositCoin] = this.writeInputCoins(deposit, [depositAmount]);
+    const [repaymentCoin] = this.writeInputCoins(repayment, [repaymentAmount]);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       const priceResult = price === null || price === "none" ? void 0 : this.aggregatePricesWith(price, this.transaction, [
         collateralSymbol
@@ -2053,6 +2123,15 @@ var VirtueClient = class _VirtueClient {
     const { collateralSymbol, accountObjId, recipient, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
+    const position = (await this.getDebtorPositions(this.sender)).find(
+      (p) => p.collateral === collateralSymbol
+    );
+    const debtNow = BigInt(_nullishCoalesce(_optionalChain([position, 'optionalAccess', _48 => _48.debtAmount]), () => ( "0")));
+    const repaymentCoins = await this.selectCoinsOfType(
+      this.config.COIN_TYPES.VUSD,
+      [],
+      { atLeast: debtNow, prefer: debtNow + closeDebtMargin(debtNow) }
+    );
     this.transaction.setSender(this.sender);
     const collType = this.config.COIN_TYPES[collateralSymbol];
     const [collAmount, debtAmount] = this.transaction.moveCall({
@@ -2064,7 +2143,7 @@ var VirtueClient = class _VirtueClient {
         this.transaction.object.clock()
       ]
     });
-    const repaymentCoin = await this.splitInputCoins("VUSD", debtAmount);
+    const [repaymentCoin] = this.writeInputCoins(repaymentCoins, [debtAmount]);
     let updateRequest = this.debtorRequest({
       collateralSymbol,
       depositCoin: this.zeroCoin(collateralSymbol),

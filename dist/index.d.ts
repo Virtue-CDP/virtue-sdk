@@ -349,19 +349,33 @@ declare class VirtueClient {
      */
     private selectInputCoins;
     /**
+     * @description Coin selection for any non-IOTA coin type: a zero coin for a
+     * zero total, otherwise the sender's coins. The one place the zero rule lives.
+     */
+    private selectCoinsOfType;
+    /**
      * @description The writing half of `splitInputCoins`. Pure: no RPC calls, so
      * it cannot fail once the coins have been selected.
      */
     private writeInputCoins;
     /**
-     * @description Read the sender's coins of `coinType` until they cover the
-     * amounts, at most `MAX_COINS_PER_SPLIT` of them.
+     * @description Choose the sender's coins of `coinType` to cover a split.
      *
-     * `getCoins` is paginated. With a known total, reading stops as soon as the
-     * coins cover it. With a total only known on chain (an amount given as a
-     * transaction argument), every coin is read, up to the cap. Past the cap the
-     * wallet is too fragmented to merge in one transaction, and that is thrown
-     * rather than building one that fails: merge the coins first.
+     * Whole pages are read until the coins read cover the amount, up to
+     * `MAX_COINS_READ`, and then the fewest, largest coins that cover it are
+     * taken, at most `MAX_COINS_PER_SPLIT`. Page order is not value order, so
+     * picking by size is what lets dust listed ahead of one large coin still
+     * build.
+     *
+     * `bounds` is for an amount only known on chain but estimable off chain (a
+     * debt that accrues interest): `prefer` is covered when the wallet can, and
+     * `atLeast` is the floor below which there is not enough balance. With no
+     * bounds and no known total, every coin must be read and merged, and a wallet
+     * past the merge cap is refused.
+     *
+     * Throws rather than build a transaction that would fail: "Not enough
+     * balance", or "Too many ... coins" for a wallet too fragmented for one
+     * transaction, which should merge its coins first.
      */
     private selectCoins;
     /**
@@ -716,6 +730,13 @@ declare class VirtueClient {
         recipient?: string;
         keepTransaction?: boolean;
     }): Promise<Transaction>;
+    /**
+     * @description Select a position build's deposit and repayment coins: every
+     * read and balance check, nothing written. Both settle before either is
+     * written, so a shortfall on one cannot leave the other's merge and split in
+     * a kept transaction.
+     */
+    private selectPositionCoins;
     /**
      * @description The body of `buildManagePositionTransaction`, split out so the
      * entry point above can settle its preconditions before anything is written.
