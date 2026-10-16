@@ -196,6 +196,7 @@ declare class VirtueClient {
     transaction: Transaction;
     sender: string;
     config: ConfigType;
+    private network;
     private pythLazer;
     constructor(inputs?: {
         network?: "mainnet" | "testnet";
@@ -546,11 +547,25 @@ declare class VirtueClient {
      */
     checkResponseForStabilityPool(response: TransactionArgument): void;
     /**
-     * @description The debtor's current debt on `collateralSymbol`, interest
-     * included, read with `vault::try_get_position_data`. A position that does not
-     * exist has no debt. Transport failures propagate.
+     * @description Whether this withdrawal can go ahead with no price at all.
+     *
+     * Answered by dev-inspecting the real withdrawal with `option::none`, never by
+     * reasoning about the vault's rules: `update_position` decides when it needs a
+     * price (today, a borrow or a withdrawal that leaves debt), and a copy of that
+     * rule here would drift the moment the vault changed. Only a successful
+     * inspection says yes. One that aborts, for any reason, says no; one that
+     * could not run at all is a transport failure and is raised as one.
+     *
+     * Narrowed to what an inspection of committed state can vouch for: a plain
+     * withdrawal (nothing deposited, repaid or borrowed), by a real sender, on a
+     * transaction carrying nothing else. Commands already composed ahead of it,
+     * a borrow on this same position say, would change the state it executes
+     * against.
+     *
+     * The probe is built by a scratch client so it never touches this client's
+     * transaction; a plain withdrawal builds without any RPC calls.
      */
-    private currentDebt;
+    private canWithdrawWithoutPrice;
     /**
      * @description build and return Transaction of manage position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"

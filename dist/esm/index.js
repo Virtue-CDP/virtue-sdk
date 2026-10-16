@@ -473,6 +473,9 @@ var getCoinSymbol2 = (coinType, coinTypes) => {
   return void 0;
 };
 var DUMMY_ADDRESS = normalizeIotaAddress2("0x0");
+var noPriceError = (symbol) => new Error(
+  `No oracle rule could price ${symbol}: borrowing, and withdrawing while in debt, require a price.`
+);
 var TYPE_NAME_STRUCT = bcs.struct("TypeName", {
   name: bcs.String
 });
@@ -488,11 +491,12 @@ var POOL_POSITION_DATA = bcs.struct("StabilityPoolPositionData", {
   coll_amounts: bcs.vector(bcs.U64),
   timestamp: bcs.U64
 });
-var VirtueClient = class {
+var VirtueClient = class _VirtueClient {
   constructor(inputs) {
     const { network, rpcUrl, sender, pythLazer } = inputs ?? {};
     this.pythLazer = pythLazer ?? {};
-    this.config = CONFIG[network ?? "mainnet"];
+    this.network = network ?? "mainnet";
+    this.config = CONFIG[this.network];
     this.rpcEndpoint = rpcUrl ?? getFullnodeUrl(network ?? "mainnet");
     this.sender = sender ? normalizeIotaAddress2(sender) : DUMMY_ADDRESS;
     this.iotaClient = new IotaClient({ url: this.rpcEndpoint });
@@ -1575,28 +1579,53 @@ var VirtueClient = class {
   }
   /* ----- Transaction Methods ----- */
   /**
-   * @description The debtor's current debt on `collateralSymbol`, interest
-   * included, read with `vault::try_get_position_data`. A position that does not
-   * exist has no debt. Transport failures propagate.
+   * @description Whether this withdrawal can go ahead with no price at all.
+   *
+   * Answered by dev-inspecting the real withdrawal with `option::none`, never by
+   * reasoning about the vault's rules: `update_position` decides when it needs a
+   * price (today, a borrow or a withdrawal that leaves debt), and a copy of that
+   * rule here would drift the moment the vault changed. Only a successful
+   * inspection says yes. One that aborts, for any reason, says no; one that
+   * could not run at all is a transport failure and is raised as one.
+   *
+   * Narrowed to what an inspection of committed state can vouch for: a plain
+   * withdrawal (nothing deposited, repaid or borrowed), by a real sender, on a
+   * transaction carrying nothing else. Commands already composed ahead of it,
+   * a borrow on this same position say, would change the state it executes
+   * against.
+   *
+   * The probe is built by a scratch client so it never touches this client's
+   * transaction; a plain withdrawal builds without any RPC calls.
    */
-  async currentDebt(collateralSymbol, accountObjId) {
-    const debtor = accountObjId ?? this.sender;
-    const tx = new Transaction();
-    tx.moveCall({
-      target: `${this.config.CDP_PACKAGE_ID}::vault::try_get_position_data`,
-      typeArguments: [this.config.COIN_TYPES[collateralSymbol]],
-      arguments: [
-        tx.sharedObjectRef(this.config.VAULT_MAP[collateralSymbol].vault),
-        tx.pure.address(debtor),
-        tx.sharedObjectRef(this.config.CLOCK_OBJ)
-      ]
+  async canWithdrawWithoutPrice(inputs) {
+    const plainWithdrawal = Number(inputs.withdrawAmount) > 0 && Number(inputs.borrowAmount) === 0 && Number(inputs.depositAmount) === 0 && Number(inputs.repaymentAmount) === 0;
+    if (!plainWithdrawal) return false;
+    if (this.sender === DUMMY_ADDRESS) return false;
+    if (this.transaction.getData().commands.length > 0) return false;
+    const scratch = new _VirtueClient({
+      network: this.network,
+      rpcUrl: this.rpcEndpoint,
+      sender: this.sender
     });
-    const res = await this.iotaClient.devInspectTransactionBlock({
-      transactionBlock: tx,
-      sender: DUMMY_ADDRESS
-    });
-    const debtReturn = res.results?.[0]?.returnValues?.[1];
-    return debtReturn ? BigInt(bcs.u64().parse(Uint8Array.from(debtReturn[0]))) : 0n;
+    scratch.config = this.config;
+    const probe = await scratch.buildManagePosition(
+      { ...inputs, keepTransaction: true },
+      "none"
+    );
+    probe.setSender(this.sender);
+    let inspect;
+    try {
+      inspect = await this.iotaClient.devInspectTransactionBlock({
+        sender: this.sender,
+        transactionBlock: probe
+      });
+    } catch (error) {
+      throw new Error(
+        `Could not determine whether ${inputs.collateralSymbol} can be withdrawn without a price: the RPC dev-inspection could not be performed. This is a transport failure, not an oracle one.`,
+        { cause: error }
+      );
+    }
+    return inspect.effects.status.status === "success";
   }
   /**
    * @description build and return Transaction of manage position
@@ -1625,30 +1654,27 @@ var VirtueClient = class {
     const { collateralSymbol, borrowAmount, withdrawAmount, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
-    let prepared;
-    let withoutPrice = false;
+    let price;
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      prepared = await this.prepareOracleUpdates([
+      const prepared = await this.prepareOracleUpdates([
         basicSymbolOf(collateralSymbol)
       ]);
-      if (!await this.canPriceCollateral(collateralSymbol, prepared)) {
-        withoutPrice = Number(borrowAmount) === 0 && await this.currentDebt(collateralSymbol, inputs.accountObjId) === 0n;
-        if (!withoutPrice) {
-          throw new Error(
-            `No oracle rule could price ${collateralSymbol}: borrowing, and withdrawing while in debt, require a price.`
-          );
-        }
-        prepared = void 0;
+      if (await this.canPriceCollateral(collateralSymbol, prepared)) {
+        price = prepared;
+      } else if (await this.canWithdrawWithoutPrice(inputs)) {
+        price = "none";
+      } else {
+        throw noPriceError(collateralSymbol);
       }
     }
     this.transaction.setSender(this.sender);
-    return await this.buildManagePosition(inputs, prepared, withoutPrice);
+    return await this.buildManagePosition(inputs, price);
   }
   /**
    * @description The body of `buildManagePositionTransaction`, split out so the
    * entry point above can settle its preconditions before anything is written.
    */
-  async buildManagePosition(inputs, prepared, withoutPrice = false) {
+  async buildManagePosition(inputs, price) {
     const {
       collateralSymbol,
       depositAmount,
@@ -1665,17 +1691,11 @@ var VirtueClient = class {
     );
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      const priceResult = withoutPrice ? void 0 : this.aggregatePricesWith(
-        prepared ?? await this.prepareOracleUpdates([
-          basicSymbolOf(collateralSymbol)
-        ]),
-        this.transaction,
-        [collateralSymbol]
-      )[collateralSymbol];
-      if (!priceResult && !withoutPrice) {
-        throw new Error(
-          `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`
-        );
+      const priceResult = price === void 0 || price === "none" ? void 0 : this.aggregatePricesWith(price, this.transaction, [
+        collateralSymbol
+      ])[collateralSymbol];
+      if (!priceResult && price !== "none") {
+        throw noPriceError(collateralSymbol);
       }
       let updateRequest = this.debtorRequest({
         collateralSymbol,
