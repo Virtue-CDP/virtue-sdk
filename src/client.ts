@@ -480,9 +480,9 @@ export class VirtueClient {
     if (accountAddr === DUMMY_ADDRESS) {
       throw new Error("Invalid account address");
     }
-    // `getDynamicFieldObject` is the V2 RPC since @iota/iota-sdk 1.10, which
-    // returns no content unless asked: without `showContent` every balance
-    // would read as zero.
+    // `getDynamicFieldObject` is the V2 RPC since @iota/iota-sdk 1.7, which
+    // takes `parentObjectId` and returns no content unless asked: without
+    // `showContent` every balance would read as zero.
     const res = await this.iotaClient.getDynamicFieldObject({
       parentObjectId: this.config.STABILITY_POOL_TABLE_ID,
       name: {
@@ -491,6 +491,13 @@ export class VirtueClient {
       },
       options: { showContent: true },
     });
+    // A missing field means the account has no deposit, so zero balances. Any
+    // other error is a failed read, which must not pass for zero balances.
+    if (res.error && res.error.code !== "dynamicFieldNotFound") {
+      throw new Error(
+        `Could not read the stability pool position: ${JSON.stringify(res.error)}`,
+      );
+    }
     const collBalances: Partial<Record<COLLATERAL_COIN, number>> = {};
     Object.keys(this.config.VAULT_MAP).map((collSymbol) => {
       collBalances[collSymbol as COLLATERAL_COIN] = 0;
@@ -2021,6 +2028,13 @@ export class VirtueClient {
       );
     }
     const debtNow = BigInt(position.debtAmount);
+    // `coinWithBalance` resolves a zero budget to `coin::zero` (since 1.10), so
+    // a wallet short of the debt would only abort on chain, after signing.
+    if (debtNow > 0n && BigInt(totalBalance) < debtNow) {
+      throw new Error(
+        `Not enough VUSD to close the ${collateralSymbol} position: it owes ${debtNow} and the wallet holds ${totalBalance}.`,
+      );
+    }
     const headroom = debtNow + debtNow / 1000n + 1000n;
     const repaymentBudget =
       headroom < BigInt(totalBalance) ? headroom : BigInt(totalBalance);
