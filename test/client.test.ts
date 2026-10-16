@@ -6,7 +6,11 @@ describe("Interacting with VirtueClient", () => {
   // Instantiate Client
   const walletAddress =
     "0x08e00db614b1024014b33f86e9d0baf76a48649b317d1517536502c521d20322";
-  const client = new VirtueClient({ sender: walletAddress });
+  // Lazer is token-gated; the SDK never reads the environment itself.
+  const client = new VirtueClient({
+    sender: walletAddress,
+    pythLazer: { apiKey: process.env.PYTH_LAZER_TOKEN },
+  });
 
   // it("test ManagePosition() function (create)", async () => {
   //   const tx = await client.buildManagePositionTransaction({

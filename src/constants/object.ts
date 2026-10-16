@@ -39,15 +39,23 @@ export type ConfigType = {
   VCERT_METADATA_OBJ: SharedObjectRef;
 
   /**
-   * Switchboard On-Demand. Optional: where these are absent `aggregatePrices`
-   * skips the crank and the `switchboard_rule::feed` call entirely, which is what
-   * testnet does — there is no deployment there.
+   * Pyth Lazer. Optional: where these are absent `aggregatePrices` skips the
+   * verify and the `pyth_lazer_rule::feed` call entirely, which is what testnet
+   * does — there is no rule deployment there.
    */
-  SWITCHBOARD_PACKAGE_ID?: string;
-  SWITCHBOARD_RULE_PACKAGE_ID?: string;
-  SWITCHBOARD_RULE_CONFIG_OBJ?: SharedObjectRef;
-  /** Coin symbol -> the one `Aggregator` object `feed<T>` accepts for it. */
-  SWITCHBOARD_AGGREGATORS?: Partial<Record<COLLATERAL_COIN, string>>;
+  /** Pyth's `pyth_lazer` package; the verify entry is called here. */
+  PYTH_LAZER_PACKAGE_ID?: string;
+  /** Pyth's shared Lazer `State`, holding the trusted signer set. */
+  PYTH_LAZER_STATE_OBJ?: SharedObjectRef;
+  PYTH_LAZER_RULE_PACKAGE_ID?: string;
+  PYTH_LAZER_RULE_CONFIG_OBJ?: SharedObjectRef;
+  /** Coin symbol -> the Lazer feed id `pyth_lazer_rule` reads for it. */
+  PYTH_LAZER_FEED_IDS?: Partial<Record<COLLATERAL_COIN, number>>;
+  /**
+   * The Lazer channel to request. Must be one the token is entitled to:
+   * Virtue's grant allows nothing faster than `fixed_rate@1000ms`.
+   */
+  PYTH_LAZER_CHANNEL?: string;
 
   POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
   POINT_MANAGER_OBJ: SharedObjectRef;
@@ -158,19 +166,26 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       mutable: false,
     },
 
-    SWITCHBOARD_PACKAGE_ID:
-      "0x8650249db8ffcffe8eb08b0696a8cb71e325f2afb9abc646f45344077b073ba1",
-    SWITCHBOARD_RULE_PACKAGE_ID:
-      "0x39fb7adf0abd75b31868e17706b8600cc943bc27422fb582f6e14282029cd5f0",
-    SWITCHBOARD_RULE_CONFIG_OBJ: {
+    PYTH_LAZER_PACKAGE_ID:
+      "0x8aa43bd5c14eac8de636e2106f53a1cc9dc2bc0e1a1ad51c9846a0b167552e29",
+    PYTH_LAZER_STATE_OBJ: {
       objectId:
-        "0xa0c7b527f35476c51938d0ffd144b83cd7ee5091f516327228391b77e03afa3e",
-      initialSharedVersion: 759082916,
+        "0xbfaaf85f467dd5d9af0f064afb61ceb8c5f0f27c480d4a68ccd4d85cf1c634fb",
+      initialSharedVersion: 698963331,
       mutable: false,
     },
-    SWITCHBOARD_AGGREGATORS: {
-      IOTA: "0x7c16ffdac553a4816db57e5e2cfbba8245337f2983b4ffb4dd944493a530c556",
+    PYTH_LAZER_RULE_PACKAGE_ID:
+      "0x24e3bae5be0985b32336a5cea2ff95304b1d5cf99dc1f28d6e0acb3eb65209bd",
+    PYTH_LAZER_RULE_CONFIG_OBJ: {
+      objectId:
+        "0xb37d447c7fa5ac24c740ef49abe828ce34c6d2bf227879034a97f94afbb0e6b4",
+      initialSharedVersion: 821170473,
+      mutable: false,
     },
+    PYTH_LAZER_FEED_IDS: {
+      IOTA: 70,
+    },
+    PYTH_LAZER_CHANNEL: "fixed_rate@1000ms",
 
     POINT_GLOBAL_CONFIG_OBJ: {
       objectId:

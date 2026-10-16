@@ -85,16 +85,22 @@ var CONFIG = {
       initialSharedVersion: 427133775,
       mutable: false
     },
-    SWITCHBOARD_PACKAGE_ID: "0x8650249db8ffcffe8eb08b0696a8cb71e325f2afb9abc646f45344077b073ba1",
-    SWITCHBOARD_RULE_PACKAGE_ID: "0x39fb7adf0abd75b31868e17706b8600cc943bc27422fb582f6e14282029cd5f0",
-    SWITCHBOARD_RULE_CONFIG_OBJ: {
-      objectId: "0xa0c7b527f35476c51938d0ffd144b83cd7ee5091f516327228391b77e03afa3e",
-      initialSharedVersion: 759082916,
+    PYTH_LAZER_PACKAGE_ID: "0x8aa43bd5c14eac8de636e2106f53a1cc9dc2bc0e1a1ad51c9846a0b167552e29",
+    PYTH_LAZER_STATE_OBJ: {
+      objectId: "0xbfaaf85f467dd5d9af0f064afb61ceb8c5f0f27c480d4a68ccd4d85cf1c634fb",
+      initialSharedVersion: 698963331,
       mutable: false
     },
-    SWITCHBOARD_AGGREGATORS: {
-      IOTA: "0x7c16ffdac553a4816db57e5e2cfbba8245337f2983b4ffb4dd944493a530c556"
+    PYTH_LAZER_RULE_PACKAGE_ID: "0x24e3bae5be0985b32336a5cea2ff95304b1d5cf99dc1f28d6e0acb3eb65209bd",
+    PYTH_LAZER_RULE_CONFIG_OBJ: {
+      objectId: "0xb37d447c7fa5ac24c740ef49abe828ce34c6d2bf227879034a97f94afbb0e6b4",
+      initialSharedVersion: 821170473,
+      mutable: false
     },
+    PYTH_LAZER_FEED_IDS: {
+      IOTA: 70
+    },
+    PYTH_LAZER_CHANNEL: "fixed_rate@1000ms",
     POINT_GLOBAL_CONFIG_OBJ: {
       objectId: "0x86f95e88bcc50edbd930153079db969e92f050c887d7d4b4642a08cbb04d8787",
       initialSharedVersion: 126182186,
@@ -408,7 +414,15 @@ var _bcs = require('@iota/iota-sdk/bcs');
 
 
 
-var SWITCHBOARD_CRANK_TIMEOUT_MS = 5e3;
+var LAZER_FETCH_TIMEOUT_MS = 5e3;
+var DEFAULT_LAZER_ENDPOINT = "https://pyth-lazer-0.dourolabs.app";
+var LAZER_PROPERTIES = [
+  "price",
+  "exponent",
+  "confidence",
+  "feedUpdateTimestamp",
+  "marketSession"
+];
 var BASIC_PRICE_SYMBOLS = ["IOTA"];
 var getCoinSymbol2 = (coinType, coinTypes) => {
   const coin = Object.keys(coinTypes).find(
@@ -437,7 +451,8 @@ var POOL_POSITION_DATA = _bcs.bcs.struct("StabilityPoolPositionData", {
 });
 var VirtueClient = class {
   constructor(inputs) {
-    const { network, rpcUrl, sender } = _nullishCoalesce(inputs, () => ( {}));
+    const { network, rpcUrl, sender, pythLazer } = _nullishCoalesce(inputs, () => ( {}));
+    this.pythLazer = _nullishCoalesce(pythLazer, () => ( {}));
     this.config = CONFIG[_nullishCoalesce(network, () => ( "mainnet"))];
     this.rpcEndpoint = _nullishCoalesce(rpcUrl, () => ( _client.getFullnodeUrl.call(void 0, _nullishCoalesce(network, () => ( "mainnet")))));
     this.sender = sender ? _utils.normalizeIotaAddress.call(void 0, sender) : DUMMY_ADDRESS;
@@ -956,45 +971,37 @@ var VirtueClient = class {
    * been written to — and it would pay for the same work twice.
    */
   async prepareOracleUpdates(basicSymbols = BASIC_PRICE_SYMBOLS) {
-    const switchboardAggregators = _nullishCoalesce(this.config.SWITCHBOARD_AGGREGATORS, () => ( {}));
-    const switchboard = {};
-    for (const symbol of basicSymbols) {
-      const aggregatorId = switchboardAggregators[symbol];
-      if (!aggregatorId) continue;
-      const prepared = await this.prepareSwitchboard(aggregatorId);
-      if (prepared) switchboard[symbol] = prepared;
-    }
-    return { switchboard };
+    const feedIds = basicSymbols.filter((symbol) => this.lazerRuleFeeds(symbol)).map((symbol) => this.config.PYTH_LAZER_FEED_IDS[symbol]);
+    return { lazer: await this.prepareLazer(feedIds) };
   }
   /**
-   * @description Whether the Switchboard rule is wired up for a symbol at all.
+   * @description Whether the Lazer rule is wired up for a symbol at all.
    *
-   * Config alone decides whether the rule is *added*. It abstains on a stale
-   * aggregator rather than aborting, so adding it costs nothing — but note it is
-   * not unconditionally fail-soft: the deployed rule aborts on a coin type it
-   * has no mapping for (`err_unsupported_coin_type`) or an aggregator that is
-   * not the one registered for that coin (`err_invalid_aggregator`). Live config
-   * is aligned today, and `canPriceCollateral` dev-inspects the real aggregation
-   * rather than trusting that, so a drifted rule config surfaces as "cannot
-   * price" instead of a failed transaction.
+   * Config alone decides whether the rule is *added*. The rule abstains on a
+   * stale or incomplete update rather than aborting, but it aborts on a coin type
+   * it has no feed id for (`EUnsupportedCoinType`). Live config is aligned today,
+   * and `canPriceCollateral` dev-inspects the real aggregation rather than
+   * trusting that, so a drifted rule config surfaces as "cannot price" instead
+   * of a failed transaction.
    */
-  switchboardRuleFeeds(symbol) {
-    return !!_optionalChain([this, 'access', _26 => _26.config, 'access', _27 => _27.SWITCHBOARD_AGGREGATORS, 'optionalAccess', _28 => _28[symbol]]) && !!this.config.SWITCHBOARD_RULE_PACKAGE_ID && !!this.config.SWITCHBOARD_RULE_CONFIG_OBJ;
+  lazerRuleFeeds(symbol) {
+    return _optionalChain([this, 'access', _26 => _26.config, 'access', _27 => _27.PYTH_LAZER_FEED_IDS, 'optionalAccess', _28 => _28[symbol]]) !== void 0 && !!this.config.PYTH_LAZER_PACKAGE_ID && !!this.config.PYTH_LAZER_STATE_OBJ && !!this.config.PYTH_LAZER_RULE_PACKAGE_ID && !!this.config.PYTH_LAZER_RULE_CONFIG_OBJ;
   }
   /**
    * @description Whether the prepared data can actually price this collateral.
    *
    * Answered by building the aggregation and dev-inspecting it, rather than by
    * reasoning about which rules are configured. Configuration is not the
-   * question — being wired up to Switchboard says nothing about whether its
-   * aggregator still holds a result the rule will accept. With nothing cranked
-   * and a stale aggregator the rule abstains, `aggregate` fails its threshold
-   * with `err_total_weight_not_enough`, and a predicate that had said "yes"
-   * would already have written a doomed position onto the caller's transaction.
+   * question — having a Lazer update says nothing about whether the rule will
+   * accept it. An update signed too long ago, or one whose confidence band is
+   * wider than the rule's gate, makes the rule abstain, `aggregate` fails its
+   * threshold with `err_total_weight_not_enough`, and a predicate that had said
+   * "yes" would already have written a doomed position onto the caller's
+   * transaction.
    *
    * Running the real thing also covers what a predicate would miss: a rule
-   * config drifted from the aggregator it is asked about, or any future rule
-   * with its own abort conditions.
+   * config drifted from the coin types asked about, or any future rule with its
+   * own abort conditions.
    *
    * Built on a transaction of its own. Assigning a scratch transaction to
    * `this.transaction` for the duration would expose it through
@@ -1026,126 +1033,95 @@ var VirtueClient = class {
     return inspect.effects.status.status === "success";
   }
   /**
-   * @description Fetch signed Switchboard responses and keep the ones that will
-   * actually validate on chain, without touching the current transaction.
+   * @description Fetch one signed Lazer update for `feedIds` and keep it only if
+   * it verifies on chain, without touching the current transaction.
    *
-   * Switchboard is on-demand, not push: `Aggregator.current_result` only changes
-   * when someone submits a signed oracle response. Left alone the IOTA mainnet
-   * feed sat 330 days stale, so the crank belongs in the same PTB as the read.
+   * Lazer is pull-based: nothing is stored on chain, so the signed update has to
+   * travel in the same PTB as the read, through
+   * `pyth_lazer::parse_and_verify_le_ecdsa_update`. One update carries every
+   * requested feed, so one signature check covers all of them.
    *
-   * Two things make this awkward, both handled here:
+   * The update is dev-inspected through the verifier before it is kept. A PTB is
+   * all-or-nothing, so an update the verifier rejects — a proxy returning the
+   * wrong bytes, a signer Pyth has rotated out — would otherwise take the entire
+   * price read, and whatever borrow or liquidation is bundled with it, down too.
    *
-   * - Most oracles on the IOTA queues are broken — their signature no longer
-   *   recovers to the `secp256k1_key` in their on-chain `Oracle` object, so
-   *   `aggregator_submit_result_action::validate` aborts. Crossbar hands out one
-   *   at random per request, so a plain crank succeeds about a quarter of the
-   *   time. `numSignatures` asks for the whole set instead.
-   * - A PTB is all-or-nothing, so one broken oracle would take the entire price
-   *   read — and whatever borrow or liquidation is bundled with it — down too.
-   *   Each response is therefore devInspected on its own and only the survivors
-   *   are kept.
-   *
-   * Never throws: a crossbar outage, a slow endpoint, a malformed response or an
-   * RPC failure all come back `null`. Switchboard is one rule among several, so
-   * raising here would take down price reads that the others could have served.
+   * Never throws: no access configured, an endpoint outage, a slow or
+   * unauthorised response, malformed bytes or an RPC failure all come back
+   * `null`, which the caller reads as "no price".
    */
-  async prepareSwitchboard(aggregatorId, numSignatures = 8) {
-    const pkg = this.config.SWITCHBOARD_PACKAGE_ID;
-    if (!pkg) return null;
+  async prepareLazer(feedIds) {
+    const channel = this.config.PYTH_LAZER_CHANNEL;
+    if (feedIds.length === 0 || !channel) return null;
+    const endpoint = (_nullishCoalesce(this.pythLazer.endpoint, () => ( DEFAULT_LAZER_ENDPOINT))).replace(
+      /\/+$/,
+      ""
+    );
     try {
-      const res = await fetch(
-        `https://crossbar.switchboard.xyz/updates/iota/mainnet/${aggregatorId}?numSignatures=${numSignatures}`,
-        { signal: AbortSignal.timeout(SWITCHBOARD_CRANK_TIMEOUT_MS) }
-      );
-      if (!res.ok) return null;
-      const body = await res.json();
-      const results = (_nullishCoalesce(body.responses, () => ( []))).flatMap((r) => _nullishCoalesce(r.results, () => ( []))).filter((r) => r.signature && r.signature !== "00" && r.successValue);
-      if (results.length === 0) return null;
-      const aggObj = await this.iotaClient.getObject({
-        id: aggregatorId,
-        options: { showContent: true }
+      const headers = {
+        "Content-Type": "application/json"
+      };
+      if (this.pythLazer.apiKey) {
+        headers.Authorization = `Bearer ${this.pythLazer.apiKey}`;
+      }
+      const res = await fetch(`${endpoint}/v1/latest_price`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          priceFeedIds: feedIds,
+          properties: LAZER_PROPERTIES,
+          formats: ["leEcdsa"],
+          jsonBinaryEncoding: "hex",
+          channel
+        }),
+        signal: AbortSignal.timeout(LAZER_FETCH_TIMEOUT_MS)
       });
-      const queue = _optionalChain([aggObj, 'access', _29 => _29.data, 'optionalAccess', _30 => _30.content, 'optionalAccess', _31 => _31.fields, 'optionalAccess', _32 => _32.queue]);
-      if (!queue) return null;
-      const verdicts = await Promise.all(
-        results.map(async (r) => {
-          try {
-            const probe = new (0, _transactions.Transaction)();
-            if (!this.addSwitchboardSubmission(probe, aggregatorId, queue, r)) {
-              return void 0;
-            }
-            const inspect = await this.iotaClient.devInspectTransactionBlock({
-              sender: DUMMY_ADDRESS,
-              transactionBlock: probe
-            });
-            return inspect.effects.status.status === "success" ? r : void 0;
-          } catch (e2) {
-            return void 0;
-          }
-        })
-      );
-      const validated = verdicts.filter(
-        (r) => r !== void 0
-      );
-      if (validated.length === 0) return null;
-      return { aggregatorId, queue, results: validated };
+      if (!res.ok) return null;
+      const update = this.lazerUpdateFromResponse(await res.json());
+      if (!update) return null;
+      const probe = new (0, _transactions.Transaction)();
+      this.verifyLazerUpdate(probe, update);
+      const inspect = await this.iotaClient.devInspectTransactionBlock({
+        sender: DUMMY_ADDRESS,
+        transactionBlock: probe
+      });
+      return inspect.effects.status.status === "success" ? update : null;
+    } catch (e2) {
+      return null;
+    }
+  }
+  /**
+   * @description Pull the signed `leEcdsa` bytes out of a `/v1/latest_price`
+   * response body, or `null` when it carries none. Pure — no I/O.
+   *
+   * `Buffer` is a Node global that browser bundles do not provide, and a
+   * ReferenceError here would be swallowed by the fail-soft catch around
+   * preparation — quietly disabling the only price source there is, for every
+   * dApp consumer. `fromHEX` works in both runtimes.
+   */
+  lazerUpdateFromResponse(body) {
+    const hex = _optionalChain([body, 'optionalAccess', _29 => _29.leEcdsa, 'optionalAccess', _30 => _30.data]);
+    if (typeof hex !== "string" || hex.length === 0) return null;
+    try {
+      return _utils.fromHEX.call(void 0, hex);
     } catch (e3) {
       return null;
     }
   }
   /**
-   * @description Append one `aggregator_submit_result_action::run` call. Pure —
-   * no I/O — so replaying a response that already passed its probe cannot fail.
-   * Returns false for a signature that is not the 65 bytes the action expects.
+   * @description Append the Lazer verify call and return the verified `Update`.
+   * Pure — no I/O — so replaying an update that already passed its probe cannot
+   * fail on account of the SDK.
    */
-  addSwitchboardSubmission(tx, aggregatorId, queue, r) {
-    const pkg = this.config.SWITCHBOARD_PACKAGE_ID;
-    if (!pkg) return false;
-    let signature;
-    try {
-      signature = _utils.fromHEX.call(void 0, r.signature);
-    } catch (e4) {
-      return false;
-    }
-    if (signature.length !== 65) return false;
-    const [fee] = tx.splitCoins(tx.gas, [0]);
-    tx.moveCall({
-      target: `${pkg}::aggregator_submit_result_action::run`,
-      typeArguments: ["0x2::iota::IOTA"],
+  verifyLazerUpdate(tx, update) {
+    return tx.moveCall({
+      target: `${this.config.PYTH_LAZER_PACKAGE_ID}::pyth_lazer::parse_and_verify_le_ecdsa_update`,
       arguments: [
-        tx.object(aggregatorId),
-        tx.object(queue),
-        tx.pure.u128(BigInt(r.successValue.replace(/^-/, ""))),
-        tx.pure.bool(r.isNegative || r.successValue.startsWith("-")),
-        tx.pure.u64(BigInt(r.timestamp)),
-        tx.object(r.oracleId),
-        tx.pure.vector("u8", signature),
+        tx.sharedObjectRef(this.config.PYTH_LAZER_STATE_OBJ),
         tx.object.clock(),
-        fee
+        tx.pure.vector("u8", update)
       ]
     });
-    return true;
-  }
-  /**
-   * @description Add the prepared Switchboard submissions to the current
-   * transaction, so the aggregator is fresh before anything in this same PTB
-   * reads it. Returns how many were added; zero simply means the rule will read
-   * whatever is already on chain and abstain if that is stale.
-   */
-  applySwitchboard(prepared, tx) {
-    if (!prepared) return 0;
-    let added = 0;
-    for (const r of prepared.results) {
-      if (this.addSwitchboardSubmission(
-        tx,
-        prepared.aggregatorId,
-        prepared.queue,
-        r
-      )) {
-        added++;
-      }
-    }
-    return added;
   }
   /**
    * @description Get a price result
@@ -1166,29 +1142,22 @@ var VirtueClient = class {
    */
   async aggregatePricesWith(prepared, tx = this.transaction) {
     const basicSymbol = BASIC_PRICE_SYMBOLS;
-    const switchboardAggregators = _nullishCoalesce(this.config.SWITCHBOARD_AGGREGATORS, () => ( {}));
-    for (const symbol of basicSymbol) {
-      this.applySwitchboard(prepared.switchboard[symbol], tx);
-    }
+    const lazerUpdate = prepared.lazer ? this.verifyLazerUpdate(tx, prepared.lazer) : void 0;
     const basicPriceResults = basicSymbol.reduce(
       (result, symbol) => {
         const coinType = this.config.COIN_TYPES[symbol];
-        const switchboardAggregatorId = switchboardAggregators[symbol];
-        const switchboardFeeds = this.switchboardRuleFeeds(symbol);
-        if (!switchboardFeeds) return result;
+        if (!lazerUpdate || !this.lazerRuleFeeds(symbol)) return result;
         const collector = this.newPriceCollector(symbol, tx);
-        if (switchboardFeeds && switchboardAggregatorId) {
-          tx.moveCall({
-            target: `${this.config.SWITCHBOARD_RULE_PACKAGE_ID}::switchboard_rule::feed`,
-            typeArguments: [coinType],
-            arguments: [
-              collector,
-              tx.sharedObjectRef(this.config.SWITCHBOARD_RULE_CONFIG_OBJ),
-              tx.object.clock(),
-              tx.object(switchboardAggregatorId)
-            ]
-          });
-        }
+        tx.moveCall({
+          target: `${this.config.PYTH_LAZER_RULE_PACKAGE_ID}::pyth_lazer_rule::feed`,
+          typeArguments: [coinType],
+          arguments: [
+            collector,
+            tx.sharedObjectRef(this.config.PYTH_LAZER_RULE_CONFIG_OBJ),
+            tx.object.clock(),
+            lazerUpdate
+          ]
+        });
         const priceResult = tx.moveCall({
           target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
           typeArguments: [coinType],
@@ -1502,12 +1471,11 @@ var VirtueClient = class {
    * @returns Transaction
    *
    * **Sign and execute this promptly.** Borrowing or withdrawing embeds a signed
-   * Switchboard response, and the queue only accepts one for
-   * `max_staleness_seconds` after the oracle signed it — 150s on the configured
-   * queue, counted from the signing time rather than from now, so the usable
-   * window is shorter than that. Past it,
-   * `aggregator_submit_result_action::validate` aborts and takes the whole
-   * transaction with it. A transaction held that long must be rebuilt, not
+   * Pyth Lazer update, and `pyth_lazer_rule` only accepts one within its
+   * freshness tolerance of the moment Pyth signed it — 30s by default, counted
+   * from the signing time rather than from now. Past it the rule abstains,
+   * `aggregate` aborts with `err_total_weight_not_enough`, and the whole
+   * transaction goes with it. A transaction held that long must be rebuilt, not
    * resubmitted. This deadline is inherent to feeding a price on chain.
    *
    * Either the whole position is built or the transaction is left exactly as it
