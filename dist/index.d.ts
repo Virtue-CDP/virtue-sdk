@@ -156,6 +156,21 @@ type ConfigType = {
 declare const CONFIG: Record<"mainnet" | "testnet", ConfigType>;
 
 /**
+ * Pyth's Lazer HTTP API hosts, tried in order until one answers with an update.
+ * Each serves the same signed data. Override with `pythLazer.endpoint` to go
+ * through a proxy; exported so that proxy can use the same hosts.
+ */
+declare const DEFAULT_LAZER_ENDPOINTS: readonly string[];
+/**
+ * Properties requested in every Lazer update. `pyth_lazer_rule` abstains on an
+ * update missing `confidence` or `feedUpdateTimestamp`, and reads
+ * `marketSession` when present, so trimming this list silently loses the price.
+ *
+ * Exported so a proxy in front of Lazer can request exactly this list rather
+ * than keep a copy that drifts when the SDK needs another property.
+ */
+declare const LAZER_PROPERTIES: readonly ["price", "exponent", "confidence", "feedUpdateTimestamp", "marketSession"];
+/**
  * Access to Pyth Lazer. Lazer is token-gated, and the token is a secret: a
  * browser must not hold it. A dApp should point `endpoint` at its own server
  * route that forwards `POST /v1/latest_price` with the token attached, and pass
@@ -168,7 +183,7 @@ type PythLazerAccess = {
      * Base URL(s) serving `POST /v1/latest_price`, tried in order until one
      * returns an update. Defaults to Pyth's own hosts.
      */
-    endpoint?: string | string[];
+    endpoint?: string | readonly string[];
 };
 declare class VirtueClient {
     /**
@@ -181,6 +196,7 @@ declare class VirtueClient {
     transaction: Transaction;
     sender: string;
     config: ConfigType;
+    private network;
     private pythLazer;
     constructor(inputs?: {
         network?: "mainnet" | "testnet";
@@ -531,6 +547,26 @@ declare class VirtueClient {
      */
     checkResponseForStabilityPool(response: TransactionArgument): void;
     /**
+     * @description Whether this withdrawal can go ahead with no price at all.
+     *
+     * Answered by dev-inspecting the real withdrawal with `option::none`, never by
+     * reasoning about the vault's rules: `update_position` decides when it needs a
+     * price (today, a borrow or a withdrawal that leaves debt), and a copy of that
+     * rule here would drift the moment the vault changed. Only a successful
+     * inspection says yes. One that aborts, for any reason, says no; one that
+     * could not run at all is a transport failure and is raised as one.
+     *
+     * Narrowed to what an inspection of committed state can vouch for: a plain
+     * withdrawal (nothing deposited, repaid or borrowed), by a real sender, on a
+     * transaction carrying nothing else. Commands already composed ahead of it,
+     * a borrow on this same position say, would change the state it executes
+     * against.
+     *
+     * The probe is built by a scratch client so it never touches this client's
+     * transaction; a plain withdrawal builds without any RPC calls.
+     */
+    private canWithdrawWithoutPrice;
+    /**
      * @description build and return Transaction of manage position
      * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
      * @param depositAmount: how much amount to deposit (collateral)
@@ -656,4 +692,4 @@ declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
 
-export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type PythLazerAccess, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject };
+export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, DEFAULT_LAZER_ENDPOINTS, type Double, type Float, type IotaObjectDataWithContent, LAZER_PROPERTIES, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type PythLazerAccess, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject };

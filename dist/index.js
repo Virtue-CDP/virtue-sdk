@@ -1,4 +1,4 @@
-"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _nullishCoalesce(lhs, rhsFn) { if (lhs != null) { return lhs; } else { return rhsFn(); } } async function _asyncNullishCoalesce(lhs, rhsFn) { if (lhs != null) { return lhs; } else { return await rhsFn(); } } function _optionalChain(ops) { let lastAccessLHS = undefined; let value = ops[0]; let i = 1; while (i < ops.length) { const op = ops[i]; const fn = ops[i + 1]; i += 2; if ((op === 'optionalAccess' || op === 'optionalCall') && value == null) { return undefined; } if (op === 'access' || op === 'optionalAccess') { lastAccessLHS = value; value = fn(value); } else if (op === 'call' || op === 'optionalCall') { value = fn((...args) => value.call(lastAccessLHS, ...args)); lastAccessLHS = undefined; } } return value; }// src/client.ts
+"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _nullishCoalesce(lhs, rhsFn) { if (lhs != null) { return lhs; } else { return rhsFn(); } } function _optionalChain(ops) { let lastAccessLHS = undefined; let value = ops[0]; let i = 1; while (i < ops.length) { const op = ops[i]; const fn = ops[i + 1]; i += 2; if ((op === 'optionalAccess' || op === 'optionalCall') && value == null) { return undefined; } if (op === 'access' || op === 'optionalAccess') { lastAccessLHS = value; value = fn(value); } else if (op === 'call' || op === 'optionalCall') { value = fn((...args) => value.call(lastAccessLHS, ...args)); lastAccessLHS = undefined; } } return value; }// src/client.ts
 
 
 var _transactions = require('@iota/iota-sdk/transactions');
@@ -444,19 +444,21 @@ var _bcs = require('@iota/iota-sdk/bcs');
 
 
 
+
+
 var LAZER_FETCH_TIMEOUT_MS = 5e3;
-var DEFAULT_LAZER_ENDPOINTS = [
+var DEFAULT_LAZER_ENDPOINTS = Object.freeze([
   "https://pyth-lazer-0.dourolabs.app",
   "https://pyth-lazer-1.dourolabs.app",
   "https://pyth-lazer-2.dourolabs.app"
-];
-var LAZER_PROPERTIES = [
+]);
+var LAZER_PROPERTIES = Object.freeze([
   "price",
   "exponent",
   "confidence",
   "feedUpdateTimestamp",
   "marketSession"
-];
+]);
 var BASIC_PRICE_SYMBOLS = ["IOTA", "iBTC"];
 var DERIVED_FROM = {
   stIOTA: "IOTA",
@@ -473,6 +475,9 @@ var getCoinSymbol2 = (coinType, coinTypes) => {
   return void 0;
 };
 var DUMMY_ADDRESS = _utils.normalizeIotaAddress.call(void 0, "0x0");
+var noPriceError = (symbol, withoutPriceRejection) => new Error(
+  `No oracle rule could price ${symbol}: borrowing, and withdrawing while in debt, require a price.` + (withoutPriceRejection ? ` A withdrawal without a price was rejected on chain: ${withoutPriceRejection}` : "")
+);
 var TYPE_NAME_STRUCT = _bcs.bcs.struct("TypeName", {
   name: _bcs.bcs.String
 });
@@ -488,11 +493,12 @@ var POOL_POSITION_DATA = _bcs.bcs.struct("StabilityPoolPositionData", {
   coll_amounts: _bcs.bcs.vector(_bcs.bcs.U64),
   timestamp: _bcs.bcs.U64
 });
-var VirtueClient = class {
+var VirtueClient = class _VirtueClient {
   constructor(inputs) {
     const { network, rpcUrl, sender, pythLazer } = _nullishCoalesce(inputs, () => ( {}));
     this.pythLazer = _nullishCoalesce(pythLazer, () => ( {}));
-    this.config = CONFIG[_nullishCoalesce(network, () => ( "mainnet"))];
+    this.network = _nullishCoalesce(network, () => ( "mainnet"));
+    this.config = CONFIG[this.network];
     this.rpcEndpoint = _nullishCoalesce(rpcUrl, () => ( _client.getFullnodeUrl.call(void 0, _nullishCoalesce(network, () => ( "mainnet")))));
     this.sender = sender ? _utils.normalizeIotaAddress.call(void 0, sender) : DUMMY_ADDRESS;
     this.iotaClient = new (0, _client.IotaClient)({ url: this.rpcEndpoint });
@@ -1575,6 +1581,64 @@ var VirtueClient = class {
   }
   /* ----- Transaction Methods ----- */
   /**
+   * @description Whether this withdrawal can go ahead with no price at all.
+   *
+   * Answered by dev-inspecting the real withdrawal with `option::none`, never by
+   * reasoning about the vault's rules: `update_position` decides when it needs a
+   * price (today, a borrow or a withdrawal that leaves debt), and a copy of that
+   * rule here would drift the moment the vault changed. Only a successful
+   * inspection says yes. One that aborts, for any reason, says no; one that
+   * could not run at all is a transport failure and is raised as one.
+   *
+   * Narrowed to what an inspection of committed state can vouch for: a plain
+   * withdrawal (nothing deposited, repaid or borrowed), by a real sender, on a
+   * transaction carrying nothing else. Commands already composed ahead of it,
+   * a borrow on this same position say, would change the state it executes
+   * against.
+   *
+   * The probe is built by a scratch client so it never touches this client's
+   * transaction; a plain withdrawal builds without any RPC calls.
+   */
+  async canWithdrawWithoutPrice(inputs) {
+    const plainWithdrawal = Number(inputs.withdrawAmount) > 0 && Number(inputs.borrowAmount) === 0 && Number(inputs.depositAmount) === 0 && Number(inputs.repaymentAmount) === 0;
+    if (!plainWithdrawal) return { ok: false };
+    if (this.sender === DUMMY_ADDRESS) return { ok: false };
+    if (this.transaction.getData().commands.length > 0) return { ok: false };
+    const { recipient, accountObjId } = inputs;
+    if (recipient !== void 0 && !_utils.isValidIotaAddress.call(void 0, _utils.normalizeIotaAddress.call(void 0, recipient))) {
+      throw new Error(
+        `Invalid recipient for a withdrawal: ${recipient}. Only borrowed VUSD can go to the stability pool.`
+      );
+    }
+    if (accountObjId !== void 0 && !_utils.isValidIotaObjectId.call(void 0, _utils.normalizeIotaAddress.call(void 0, accountObjId))) {
+      throw new Error(`Invalid accountObjId: ${accountObjId}`);
+    }
+    const scratch = new _VirtueClient({
+      network: this.network,
+      rpcUrl: this.rpcEndpoint,
+      sender: this.sender
+    });
+    scratch.config = this.config;
+    const probe = await scratch.buildManagePosition(
+      { ...inputs, keepTransaction: true },
+      "none"
+    );
+    probe.setSender(this.sender);
+    let inspect;
+    try {
+      inspect = await this.iotaClient.devInspectTransactionBlock({
+        sender: this.sender,
+        transactionBlock: probe
+      });
+    } catch (error) {
+      throw new Error(
+        `Could not determine whether ${inputs.collateralSymbol} can be withdrawn without a price: the RPC dev-inspection could not be performed. This is a transport failure, not an oracle one.`,
+        { cause: error }
+      );
+    }
+    return inspect.effects.status.status === "success" ? { ok: true } : { ok: false, rejection: _nullishCoalesce(inspect.effects.status.error, () => ( "unknown abort")) };
+  }
+  /**
    * @description build and return Transaction of manage position
    * @param collateralSymbol: collateral coin symbol , e.g "IOTA"
    * @param depositAmount: how much amount to deposit (collateral)
@@ -1601,25 +1665,32 @@ var VirtueClient = class {
     const { collateralSymbol, borrowAmount, withdrawAmount, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
-    let prepared;
+    let price;
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      prepared = await this.prepareOracleUpdates([
+      const prepared = await this.prepareOracleUpdates([
         basicSymbolOf(collateralSymbol)
       ]);
-      if (!await this.canPriceCollateral(collateralSymbol, prepared)) {
-        throw new Error(
-          `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`
-        );
+      if (await this.canPriceCollateral(collateralSymbol, prepared)) {
+        price = prepared;
+      } else {
+        const withoutPrice = await this.canWithdrawWithoutPrice(inputs);
+        if (!withoutPrice.ok) {
+          throw noPriceError(collateralSymbol, withoutPrice.rejection);
+        }
+        if (this.transaction.getData().commands.length > 0) {
+          throw noPriceError(collateralSymbol);
+        }
+        price = "none";
       }
     }
     this.transaction.setSender(this.sender);
-    return await this.buildManagePosition(inputs, prepared);
+    return await this.buildManagePosition(inputs, _nullishCoalesce(price, () => ( null)));
   }
   /**
    * @description The body of `buildManagePositionTransaction`, split out so the
    * entry point above can settle its preconditions before anything is written.
    */
-  async buildManagePosition(inputs, prepared) {
+  async buildManagePosition(inputs, price) {
     const {
       collateralSymbol,
       depositAmount,
@@ -1636,16 +1707,11 @@ var VirtueClient = class {
     );
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      const priceResults = this.aggregatePricesWith(
-        await _asyncNullishCoalesce(prepared, async () => ( await this.prepareOracleUpdates([basicSymbolOf(collateralSymbol)]))),
-        this.transaction,
-        [collateralSymbol]
-      );
-      const priceResult = priceResults[collateralSymbol];
-      if (!priceResult) {
-        throw new Error(
-          `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`
-        );
+      const priceResult = price === null || price === "none" ? void 0 : this.aggregatePricesWith(price, this.transaction, [
+        collateralSymbol
+      ])[collateralSymbol];
+      if (!priceResult && price !== "none") {
+        throw noPriceError(collateralSymbol);
       }
       let updateRequest = this.debtorRequest({
         collateralSymbol,
@@ -1947,5 +2013,7 @@ var VirtueClient = class {
 
 
 
-exports.COIN_DECIMALS = COIN_DECIMALS; exports.CONFIG = CONFIG; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
+
+
+exports.COIN_DECIMALS = COIN_DECIMALS; exports.CONFIG = CONFIG; exports.DEFAULT_LAZER_ENDPOINTS = DEFAULT_LAZER_ENDPOINTS; exports.LAZER_PROPERTIES = LAZER_PROPERTIES; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
 //# sourceMappingURL=index.js.map
