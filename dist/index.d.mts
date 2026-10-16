@@ -342,6 +342,29 @@ declare class VirtueClient {
      */
     splitInputCoins(coinSymbol: COIN, ...amounts: (string | TransactionArgument)[]): Promise<TransactionResult>;
     /**
+     * @description The reading half of `splitInputCoins`: every RPC call and
+     * every check that can fail (the coin reads, the balance), with nothing
+     * written. Lets a builder that splits several coin types settle all of them
+     * before its first command.
+     */
+    private selectInputCoins;
+    /**
+     * @description The writing half of `splitInputCoins`. Pure: no RPC calls, so
+     * it cannot fail once the coins have been selected.
+     */
+    private writeInputCoins;
+    /**
+     * @description Read the sender's coins of `coinType` until they cover the
+     * amounts, at most `MAX_COINS_PER_SPLIT` of them.
+     *
+     * `getCoins` is paginated. With a known total, reading stops as soon as the
+     * coins cover it. With a total only known on chain (an amount given as a
+     * transaction argument), every coin is read, up to the cap. Past the cap the
+     * wallet is too fragmented to merge in one transaction, and that is thrown
+     * rather than building one that fails: merge the coins first.
+     */
+    private selectCoins;
+    /**
      * @description split the needed coins of any non-IOTA coin type, merging the
      * sender's coins of that type first. Everything that can fail (the coin
      * reads, the balance check) runs before anything is written, since a

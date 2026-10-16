@@ -535,6 +535,9 @@ var getCoinSymbol2 = (coinType, coinTypes) => {
   return void 0;
 };
 var DUMMY_ADDRESS = _utils.normalizeIotaAddress.call(void 0, "0x0");
+var MAX_COINS_PER_SPLIT = 500;
+var MERGE_CHUNK = 255;
+var knownTotal = (amounts) => amounts.every((a) => typeof a === "string") ? amounts.reduce((sum, a) => sum + BigInt(a), 0n) : void 0;
 var normalizeTypeName = (type) => {
   const [address, ...rest] = type.split("::");
   return [_utils.normalizeIotaAddress.call(void 0, address).replace(/^0x/, ""), ...rest].join("::");
@@ -1020,27 +1023,110 @@ var VirtueClient = class _VirtueClient {
    * @description split the needed coins
    */
   async splitInputCoins(coinSymbol, ...amounts) {
-    const totalAmount = amounts.reduce(
-      (sum, amount) => sum + Number(amount),
-      0
+    const coins = await this.selectInputCoins(coinSymbol, ...amounts);
+    return this.writeInputCoins(coins, amounts);
+  }
+  /**
+   * @description The reading half of `splitInputCoins`: every RPC call and
+   * every check that can fail (the coin reads, the balance), with nothing
+   * written. Lets a builder that splits several coin types settle all of them
+   * before its first command.
+   */
+  async selectInputCoins(coinSymbol, ...amounts) {
+    const coinType = this.config.COIN_TYPES[coinSymbol];
+    if (knownTotal(amounts) === 0n) {
+      return { kind: "zero", coinType, count: amounts.length };
+    }
+    if (coinSymbol === "IOTA") return { kind: "gas" };
+    return this.selectCoins(coinType, amounts);
+  }
+  /**
+   * @description The writing half of `splitInputCoins`. Pure: no RPC calls, so
+   * it cannot fail once the coins have been selected.
+   */
+  writeInputCoins(coins, amounts) {
+    const tx = this.transaction;
+    const pureAmounts = () => amounts.map(
+      (amount) => typeof amount === "string" ? tx.pure.u64(amount) : amount
     );
-    if (totalAmount === 0) {
-      return this.zeroCoin(coinSymbol);
-    } else {
-      if (coinSymbol === "IOTA") {
-        return this.transaction.splitCoins(
-          this.transaction.gas,
-          amounts.map(
-            (amount) => typeof amount === "string" ? this.transaction.pure.u64(amount) : amount
-          )
-        );
-      } else {
-        return this.splitCoinsByType(
-          this.config.COIN_TYPES[coinSymbol],
-          ...amounts
+    if (coins.kind === "gas") return tx.splitCoins(tx.gas, pureAmounts());
+    if (coins.kind === "zero") {
+      const zero = tx.moveCall({
+        target: "0x2::coin::zero",
+        typeArguments: [coins.coinType]
+      });
+      if (coins.count <= 1) return zero;
+      const out2 = tx.splitCoins(
+        zero,
+        amounts.map(() => tx.pure.u64(0))
+      );
+      tx.moveCall({
+        target: "0x2::coin::destroy_zero",
+        typeArguments: [coins.coinType],
+        arguments: [zero]
+      });
+      return out2;
+    }
+    const [mainCoin, ...otherCoins] = coins.refs.map(
+      (ref) => tx.objectRef(ref)
+    );
+    for (let k = 0; k < otherCoins.length; k += MERGE_CHUNK) {
+      tx.mergeCoins(mainCoin, otherCoins.slice(k, k + MERGE_CHUNK));
+    }
+    const out = tx.splitCoins(mainCoin, pureAmounts());
+    if (otherCoins.length > 0) tx.transferObjects([mainCoin], this.sender);
+    return out;
+  }
+  /**
+   * @description Read the sender's coins of `coinType` until they cover the
+   * amounts, at most `MAX_COINS_PER_SPLIT` of them.
+   *
+   * `getCoins` is paginated. With a known total, reading stops as soon as the
+   * coins cover it. With a total only known on chain (an amount given as a
+   * transaction argument), every coin is read, up to the cap. Past the cap the
+   * wallet is too fragmented to merge in one transaction, and that is thrown
+   * rather than building one that fails: merge the coins first.
+   */
+  async selectCoins(coinType, amounts) {
+    const total = knownTotal(amounts);
+    const refs = [];
+    let held = 0n;
+    let cursor = void 0;
+    let more = true;
+    while (more && refs.length < MAX_COINS_PER_SPLIT) {
+      if (total !== void 0 && refs.length > 0 && held >= total) break;
+      const page = await this.iotaClient.getCoins({
+        owner: this.sender,
+        coinType,
+        cursor
+      });
+      for (const coin of page.data) {
+        if (refs.length >= MAX_COINS_PER_SPLIT) break;
+        if (total !== void 0 && refs.length > 0 && held >= total) break;
+        refs.push({
+          objectId: coin.coinObjectId,
+          version: coin.version,
+          digest: coin.digest
+        });
+        held += BigInt(coin.balance);
+      }
+      cursor = page.nextCursor;
+      more = page.hasNextPage && !!cursor;
+    }
+    if (refs.length === 0 || total !== void 0 && held < total) {
+      if (refs.length >= MAX_COINS_PER_SPLIT && more) {
+        throw new Error(
+          `Too many ${coinType} coins to merge in one transaction: the first ${MAX_COINS_PER_SPLIT} do not cover the amount. Merge them first.`
         );
       }
+      throw new Error("Not enough balance");
     }
+    if (total === void 0 && more) {
+      throw new Error(
+        `Too many ${coinType} coins to merge in one transaction (over ${MAX_COINS_PER_SPLIT}), and the amount is only known on chain. Merge them first.`
+      );
+    }
+    return { kind: "coins", refs };
   }
   /**
    * @description split the needed coins of any non-IOTA coin type, merging the
@@ -1049,64 +1135,8 @@ var VirtueClient = class _VirtueClient {
    * `Transaction` cannot be rolled back.
    */
   async splitCoinsByType(coinType, ...amounts) {
-    const total = amounts.every((a) => typeof a === "string") ? amounts.reduce((sum, a) => sum + BigInt(a), 0n) : void 0;
-    if (total === 0n) {
-      const zero = this.transaction.moveCall({
-        target: "0x2::coin::zero",
-        typeArguments: [coinType]
-      });
-      if (amounts.length <= 1) return zero;
-      const out2 = this.transaction.splitCoins(
-        zero,
-        amounts.map(() => this.transaction.pure.u64(0))
-      );
-      this.transaction.moveCall({
-        target: "0x2::coin::destroy_zero",
-        typeArguments: [coinType],
-        arguments: [zero]
-      });
-      return out2;
-    }
-    const userCoins = [];
-    let held = 0n;
-    let cursor = void 0;
-    do {
-      const page = await this.iotaClient.getCoins({
-        owner: this.sender,
-        coinType,
-        cursor
-      });
-      userCoins.push(...page.data);
-      held += page.data.reduce((sum, coin) => sum + BigInt(coin.balance), 0n);
-      cursor = page.hasNextPage ? page.nextCursor : null;
-    } while (cursor && (total === void 0 || held < total));
-    if (userCoins.length === 0 || total !== void 0 && held < total) {
-      throw new Error("Not enough balance");
-    }
-    const [mainCoin, ...otherCoins] = userCoins.map(
-      (coin) => this.transaction.objectRef({
-        objectId: coin.coinObjectId,
-        version: coin.version,
-        digest: coin.digest
-      })
-    );
-    if (!mainCoin) {
-      throw new Error("Not enough balance");
-    }
-    const ifMerge = otherCoins.length > 0;
-    if (ifMerge) {
-      this.transaction.mergeCoins(mainCoin, otherCoins);
-    }
-    const out = this.transaction.splitCoins(
-      mainCoin,
-      amounts.map(
-        (amount) => typeof amount === "string" ? this.transaction.pure.u64(amount) : amount
-      )
-    );
-    if (ifMerge) {
-      this.transaction.transferObjects([mainCoin], this.sender);
-    }
-    return out;
+    const coins = knownTotal(amounts) === 0n ? { kind: "zero", coinType, count: amounts.length } : await this.selectCoins(coinType, amounts);
+    return this.writeInputCoins(coins, amounts);
   }
   /* ----- Transaction Methods ----- */
   /**
@@ -1929,11 +1959,15 @@ var VirtueClient = class _VirtueClient {
       recipient,
       keepTransaction
     } = inputs;
-    const [depositCoin] = await this.splitInputCoins(
+    const depositCoins = await this.selectInputCoins(
       collateralSymbol,
       depositAmount
     );
-    const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
+    const repaymentCoins = await this.selectInputCoins("VUSD", repaymentAmount);
+    const [depositCoin] = this.writeInputCoins(depositCoins, [depositAmount]);
+    const [repaymentCoin] = this.writeInputCoins(repaymentCoins, [
+      repaymentAmount
+    ]);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
       const priceResult = price === null || price === "none" ? void 0 : this.aggregatePricesWith(price, this.transaction, [
         collateralSymbol
