@@ -2,24 +2,44 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import { VirtueClient } from "../src/index";
 
 /**
- * Switchboard is the only price source: Pyth's Hermes endpoint now answers 401
- * for everyone, so that rule was removed rather than left to fail. That makes
- * the crank load-bearing — there is no second opinion left to fall back on — and
- * these pin the two things that follow from it.
+ * Pyth Lazer is the only price source: IOTA is priced by `pyth_lazer_rule`
+ * alone, and stIOTA and vIOTA are derived from it. That makes the Lazer fetch
+ * load-bearing — there is no second opinion to fall back on — and these pin the
+ * two things that follow from it.
  *
- * First, failure has to be honest. Crossbar going away means no price, and the
- * SDK must say so before writing anything rather than hand back a transaction
- * that aborts on chain.
+ * First, failure has to be honest. Lazer going away means no price, and the SDK
+ * must say so before writing anything rather than hand back a transaction that
+ * aborts on chain.
  *
- * Second, the SDK must never be the thing that fails. A crossbar outage, a
+ * Second, the SDK must never be the thing that fails. A Lazer outage, a
  * malformed response or an RPC hiccup are all "no price", never an exception
  * escaping a read.
  *
  * They assert against dry-run `PriceAggregated` events rather than the shape of
  * the built transaction, because a PTB that looks right can still abort — a
- * `feed` pointed at a stale aggregator is the case in point.
+ * `feed` given a stale update is the case in point.
+ *
+ * Lazer is token-gated, so these need `PYTH_LAZER_TOKEN` in the environment and
+ * are skipped without it. The SDK itself never reads the environment.
  */
-describe("oracle source resilience", () => {
+const LAZER_TOKEN = process.env.PYTH_LAZER_TOKEN;
+
+/**
+ * Runs without a token on purpose: it is the no-access path, and that is the
+ * environment where a regression (a 401 starting to throw) would show up.
+ */
+describe("oracle source without Lazer access", () => {
+  it("reports no price rather than throwing without Lazer access", async () => {
+    // No token: Lazer answers 401, which must read as "no price".
+    const client = new VirtueClient({});
+    await expect(client.aggregatePrices()).resolves.toBeDefined();
+    const prices = await client.getCollateralPrices();
+    expect(prices.IOTA).toBeUndefined();
+    expect(prices.iBTC).toBeUndefined();
+  }, 90_000);
+});
+
+describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
   const realFetch = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = realFetch;
@@ -28,15 +48,18 @@ describe("oracle source resilience", () => {
 
   const WALLET =
     "0x08e00db614b1024014b33f86e9d0baf76a48649b317d1517536502c521d20322";
+  const pythLazer = { apiKey: LAZER_TOKEN };
 
-  /** Break crossbar only. The crank calls `fetch` directly, so this is the seam. */
-  const breakCrossbar = (mode: "reject" | "garbage" | "http500") => {
+  const isLazer = (input: any) => {
+    const url =
+      typeof input === "string" ? input : (input?.url ?? String(input));
+    return url.includes("/v1/latest_price");
+  };
+
+  /** Break Lazer only. The SDK calls `fetch` directly, so this is the seam. */
+  const breakLazer = (mode: "reject" | "garbage" | "http500") => {
     globalThis.fetch = (async (input: any, init?: any) => {
-      const url =
-        typeof input === "string" ? input : (input?.url ?? String(input));
-      if (!url.includes("crossbar.switchboard.xyz")) {
-        return realFetch(input, init);
-      }
+      if (!isLazer(input)) return realFetch(input, init);
       if (mode === "reject") throw new TypeError("fetch failed");
       if (mode === "http500") return new Response("nope", { status: 500 });
       return new Response("{not json", { status: 200 });
@@ -67,46 +90,215 @@ describe("oracle source resilience", () => {
     return bySymbol;
   };
 
-  it("prices IOTA and its derivatives through the Switchboard rule", async () => {
-    const client = new VirtueClient({});
+  it("prices IOTA, iBTC and the IOTA derivatives through the Lazer rule", async () => {
+    const client = new VirtueClient({ pythLazer });
     client.resetTransaction();
     const sources = await aggregatedSources(client);
-    expect(sources.IOTA).toEqual(["SwitchboardRule"]);
+    expect(sources.IOTA).toEqual(["PythLazerRule"]);
+    expect(sources.IBTC).toEqual(["PythLazerRule"]);
     // stIOTA and vIOTA are computed from the IOTA price by their own rules.
     expect(sources.CERT).toBeDefined();
   }, 90_000);
 
-  it("cranks the aggregator in the same transaction that reads it", async () => {
-    const client = new VirtueClient({});
+  it("verifies the update in the same transaction that reads it", async () => {
+    const client = new VirtueClient({ pythLazer });
     client.resetTransaction();
     await client.aggregatePrices();
     const calls = moveCallsOf(client.getTransaction());
-    // Switchboard is on-demand: without a submission ahead of it, `feed` would
-    // be reading whatever result happened to be left on chain.
-    expect(calls).toContain("aggregator_submit_result_action::run");
-    expect(calls.indexOf("aggregator_submit_result_action::run")).toBeLessThan(
-      calls.indexOf("switchboard_rule::feed"),
-    );
+    // Lazer stores nothing on chain: `feed` reads the `Update` the verify call
+    // returned, so each feed's verify has to come right before it. IOTA and
+    // iBTC each carry their own update.
+    const verify = "pyth_lazer::parse_and_verify_le_ecdsa_update";
+    expect(calls.filter((c) => c === verify)).toHaveLength(2);
+    expect(calls.filter((c) => c === "pyth_lazer_rule::feed")).toHaveLength(2);
+    calls.forEach((c, i) => {
+      if (c === "pyth_lazer_rule::feed") {
+        expect(calls.slice(0, i).lastIndexOf(verify)).toBeGreaterThan(
+          calls.slice(0, i).lastIndexOf("pyth_lazer_rule::feed"),
+        );
+      }
+    });
+    expect(
+      calls.indexOf("pyth_lazer::parse_and_verify_le_ecdsa_update"),
+    ).toBeLessThan(calls.indexOf("pyth_lazer_rule::feed"));
   }, 90_000);
 
   it.each(["reject", "garbage", "http500"] as const)(
-    "reports no price rather than throwing when crossbar is %s",
+    "reports no price rather than throwing when Lazer is %s",
     async (mode) => {
-      breakCrossbar(mode);
-      const client = new VirtueClient({});
+      breakLazer(mode);
+      const client = new VirtueClient({ pythLazer });
       client.resetTransaction();
       // The read still resolves — the SDK is never the thing that fails...
       await expect(client.aggregatePrices()).resolves.toBeDefined();
-      // ...and with nothing cranked the stale aggregator yields no price.
+      // ...and with no update there is no price.
       const prices = await client.getCollateralPrices();
       expect(prices.IOTA).toBeUndefined();
     },
     90_000,
   );
 
+  it("drops an update the on-chain verifier rejects", async () => {
+    // Well-formed JSON carrying bytes no trusted signer produced. Kept, it would
+    // abort the verify and every command bundled with it.
+    globalThis.fetch = (async (input: any, init?: any) => {
+      if (!isLazer(input)) return realFetch(input, init);
+      return new Response(
+        JSON.stringify({ leEcdsa: { encoding: "hex", data: "ab".repeat(124) } }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const client = new VirtueClient({ pythLazer });
+    client.resetTransaction();
+    await client.aggregatePrices();
+    const calls = moveCallsOf(client.getTransaction());
+    expect(calls).not.toContain("pyth_lazer::parse_and_verify_le_ecdsa_update");
+    expect(calls).not.toContain("aggregater::aggregate");
+  }, 90_000);
+
+  /** Request bodies name their feed ids, which is what tells the groups apart. */
+  const failFeed = (feedId: number) => {
+    globalThis.fetch = (async (input: any, init?: any) => {
+      if (isLazer(input)) {
+        const ids = JSON.parse(String(init?.body ?? "{}")).priceFeedIds ?? [];
+        if (ids.includes(feedId)) throw new TypeError("fetch failed");
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+  };
+
+  it("keeps IOTA priced when iBTC cannot be", async () => {
+    failFeed(1);
+    const client = new VirtueClient({ pythLazer });
+    const prices = await client.getCollateralPrices();
+    expect(prices.iBTC).toBeUndefined();
+    expect(prices.IOTA).toBeGreaterThan(0);
+    expect(prices.stIOTA).toBeGreaterThan(0);
+  }, 90_000);
+
+  it("keeps iBTC priced when IOTA cannot be", async () => {
+    failFeed(70);
+    const client = new VirtueClient({ pythLazer });
+    const prices = await client.getCollateralPrices();
+    expect(prices.IOTA).toBeUndefined();
+    expect(prices.vIOTA).toBeUndefined();
+    expect(prices.iBTC).toBeGreaterThan(0);
+  }, 90_000);
+
+  /** Whether a dev-inspected transaction calls `module::fn`. */
+  const hasCall = (args: any, module: string, fn: string) =>
+    (args.transactionBlock?.getData?.().commands ?? []).some(
+      (c: any) => c.MoveCall?.module === module && c.MoveCall?.function === fn,
+    );
+
+  it("keeps IOTA and stIOTA priced when vIOTA's own rule fails", async () => {
+    const client = new VirtueClient({ pythLazer });
+    const iota = client.getIotaClient();
+    const realInspect = iota.devInspectTransactionBlock.bind(iota);
+    // Stand in for a broken vcert pool: any inspection that reaches it fails.
+    vi.spyOn(iota, "devInspectTransactionBlock").mockImplementation(
+      async (args: any) => {
+        if (hasCall(args, "vcert_rule", "feed")) {
+          return { effects: { status: { status: "failure" } }, events: [] } as any;
+        }
+        return realInspect(args);
+      },
+    );
+
+    const prices = await client.getCollateralPrices();
+    expect(prices.vIOTA).toBeUndefined();
+    expect(prices.IOTA).toBeGreaterThan(0);
+    expect(prices.stIOTA).toBeGreaterThan(0);
+
+    client.resetTransaction();
+    const results = await client.aggregatePrices();
+    expect(results.vIOTA).toBeUndefined();
+    expect(results.IOTA).toBeDefined();
+    expect(moveCallsOf(client.getTransaction())).not.toContain(
+      "vcert_rule::feed",
+    );
+  }, 90_000);
+
+  it("drops only the collateral whose inspection hit an RPC failure", async () => {
+    const client = new VirtueClient({ pythLazer });
+    const iota = client.getIotaClient();
+    const realInspect = iota.devInspectTransactionBlock.bind(iota);
+    vi.spyOn(iota, "devInspectTransactionBlock").mockImplementation(
+      async (args: any) => {
+        const ibtc = (args.transactionBlock?.getData?.().commands ?? []).some(
+          (c: any) =>
+            (c.MoveCall?.typeArguments ?? []).some((t: string) =>
+              t.includes("::ibtc::IBTC"),
+            ),
+        );
+        if (ibtc) throw new Error("ECONNRESET");
+        return realInspect(args);
+      },
+    );
+    const prices = await client.getCollateralPrices();
+    expect(prices.iBTC).toBeUndefined();
+    expect(prices.IOTA).toBeGreaterThan(0);
+  }, 90_000);
+
+  it("throws rather than reporting no prices when the RPC is unreachable", async () => {
+    const client = new VirtueClient({ pythLazer });
+    vi.spyOn(
+      client.getIotaClient(),
+      "devInspectTransactionBlock",
+    ).mockRejectedValue(new Error("ECONNRESET"));
+    await expect(client.getCollateralPrices()).rejects.toThrow(
+      /transport failure, not an oracle one/,
+    );
+  }, 90_000);
+
+  it("throws for an unreachable RPC even when one update is missing", async () => {
+    // iBTC has no update, so its inspection never reaches the RPC; that must
+    // not mask the other three failing on transport.
+    failFeed(1);
+    const client = new VirtueClient({ pythLazer });
+    vi.spyOn(
+      client.getIotaClient(),
+      "devInspectTransactionBlock",
+    ).mockRejectedValue(new Error("ECONNRESET"));
+    await expect(client.getCollateralPrices()).rejects.toThrow(
+      /transport failure, not an oracle one/,
+    );
+  }, 90_000);
+
+  it("falls back to the next endpoint when one is down", async () => {
+    const client = new VirtueClient({
+      pythLazer: {
+        apiKey: LAZER_TOKEN,
+        endpoint: ["https://lazer.invalid", "https://pyth-lazer-0.dourolabs.app"],
+      },
+    });
+    const prices = await client.getCollateralPrices();
+    expect(prices.IOTA).toBeGreaterThan(0);
+  }, 90_000);
+
+  it("writes only the price a position needs", async () => {
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
+    const tx = await client.buildManagePositionTransaction({
+      collateralSymbol: "IOTA",
+      depositAmount: "0",
+      borrowAmount: "10000",
+      repaymentAmount: "0",
+      withdrawAmount: "0",
+    });
+    const typeArgs = (tx.getData().commands as any[]).flatMap(
+      (c) => c.MoveCall?.typeArguments ?? [],
+    );
+    // Nothing of iBTC's, and none of the derived IOTA chains either.
+    expect(typeArgs.some((t: string) => t.includes("::ibtc::IBTC"))).toBe(false);
+    const calls = moveCallsOf(tx);
+    expect(calls).not.toContain("cert_rule::feed");
+    expect(calls).not.toContain("vcert_rule::feed");
+    expect(calls).toContain("pyth_lazer_rule::feed");
+  }, 90_000);
+
   it("omits collaterals it cannot price rather than reporting them as zero", async () => {
-    breakCrossbar("reject");
-    const client = new VirtueClient({});
+    breakLazer("reject");
+    const client = new VirtueClient({ pythLazer });
     const prices = await client.getCollateralPrices();
     // Absent, not 0 — a zero would read as a real quote and value the
     // collateral at nothing.
@@ -121,7 +313,10 @@ describe("oracle source resilience", () => {
    * instance* they hold, not a replacement handed out afterwards.
    */
   it("leaves the caller's own transaction instance untouched when nothing can price the collateral", async () => {
-    const client = new VirtueClient({ sender: `0x${"2".repeat(64)}` });
+    const client = new VirtueClient({
+      sender: `0x${"2".repeat(64)}`,
+      pythLazer,
+    });
     client.resetTransaction();
 
     const callerTx = client.getTransaction();
@@ -132,7 +327,7 @@ describe("oracle source resilience", () => {
     });
     const before = callerTx.serialize();
 
-    breakCrossbar("reject");
+    breakLazer("reject");
 
     await expect(
       client.buildManagePositionTransaction({
@@ -157,7 +352,7 @@ describe("oracle source resilience", () => {
    * silently drop.
    */
   it("builds onto the caller's own transaction instance, plugins intact", async () => {
-    const client = new VirtueClient({ sender: WALLET });
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
     client.resetTransaction();
 
     const callerTx = client.getTransaction();
@@ -188,24 +383,22 @@ describe("oracle source resilience", () => {
   }, 90_000);
 
   /**
-   * The preflight that decides priceability must hand its validated responses to
-   * the build, not just its verdict. Checking and then refetching leaves a
-   * window where the check passes and the refetch fails — and by then the
-   * transaction has been written to and cannot be unwound.
+   * The preflight that decides priceability must hand its verified update to the
+   * build, not just its verdict. Checking and then refetching leaves a window
+   * where the check passes and the refetch fails — and by then the transaction
+   * has been written to and cannot be unwound.
    */
-  it("carries the prepared responses into the build instead of fetching twice", async () => {
-    const client = new VirtueClient({ sender: WALLET });
+  it("carries the prepared update into the build instead of fetching twice", async () => {
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
     client.resetTransaction();
     const callerTx = client.getTransaction();
     const commandsBefore = callerTx.getData().commands.length;
 
-    let crossbarCalls = 0;
+    let lazerCalls = 0;
     globalThis.fetch = (async (input: any, init?: any) => {
-      const url =
-        typeof input === "string" ? input : (input?.url ?? String(input));
-      if (url.includes("crossbar.switchboard.xyz")) {
-        crossbarCalls += 1;
-        if (crossbarCalls > 1) throw new TypeError("crossbar went away");
+      if (isLazer(input)) {
+        lazerCalls += 1;
+        if (lazerCalls > 1) throw new TypeError("Lazer went away");
       }
       return realFetch(input, init);
     }) as typeof fetch;
@@ -219,45 +412,42 @@ describe("oracle source resilience", () => {
       keepTransaction: true,
     });
 
-    expect(crossbarCalls).toBe(1);
+    expect(lazerCalls).toBe(1);
     expect(returned).toBe(callerTx);
     expect(callerTx.getData().commands.length).toBeGreaterThan(commandsBefore);
   }, 90_000);
 
   /**
    * `Buffer` is a Node global that browser bundles do not provide. A
-   * ReferenceError here would be swallowed by the fail-soft catch around
-   * preparation, so the only price source there is would simply never
-   * contribute in a dApp — invisibly.
+   * ReferenceError while decoding the update would be swallowed by the
+   * fail-soft catch around preparation, so the only price source there is
+   * would simply never contribute in a dApp — invisibly.
+   *
+   * Only the pure steps run with `Buffer` removed: Node's own `fetch` needs it,
+   * so the network half cannot be exercised this way, and in a browser `fetch`
+   * is native anyway.
    */
-  it("decodes response signatures without the Node Buffer global", () => {
-    const client = new VirtueClient({});
+  it("decodes the update without the Node Buffer global", () => {
+    const client = new VirtueClient({ pythLazer });
     client.resetTransaction();
     const tx = client.getTransaction();
-    const response = {
-      successValue: "43900000000000000",
-      isNegative: false,
-      timestamp: 1787734024,
-      signature: `0x${"ab".repeat(65)}`,
-      oracleId: `0x${"3".repeat(64)}`,
-    };
+    const body = { leEcdsa: { encoding: "hex", data: "ab".repeat(124) } };
 
     const savedBuffer = (globalThis as { Buffer?: unknown }).Buffer;
     delete (globalThis as { Buffer?: unknown }).Buffer;
-    let added: boolean;
+    let update: Uint8Array | null;
     try {
-      added = (client as any).addSwitchboardSubmission(
-        tx,
-        `0x${"4".repeat(64)}`,
-        `0x${"5".repeat(64)}`,
-        response,
-      );
+      update = (client as any).lazerUpdateFromResponse(body);
+      if (update) (client as any).verifyLazerUpdate(tx, update);
     } finally {
       (globalThis as { Buffer?: unknown }).Buffer = savedBuffer;
     }
 
-    expect(added).toBe(true);
-    expect(tx.getData().commands.length).toBeGreaterThan(0);
+    expect(update!).toBeInstanceOf(Uint8Array);
+    expect(update!.length).toBe(124);
+    expect(moveCallsOf(tx)).toEqual([
+      "pyth_lazer::parse_and_verify_le_ecdsa_update",
+    ]);
   });
 
   /**
@@ -267,7 +457,7 @@ describe("oracle source resilience", () => {
    * silently overwritten when the probe put the old one back.
    */
   it("hides and discards nothing while the priceability probe is in flight", async () => {
-    const client = new VirtueClient({ sender: WALLET });
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
     client.resetTransaction();
 
     let releaseProbe: () => void = () => {};
@@ -325,7 +515,7 @@ describe("oracle source resilience", () => {
    * caller looking in the wrong place.
    */
   it("does not report an unreachable RPC as oracle unavailability", async () => {
-    const client = new VirtueClient({ sender: WALLET });
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
     client.resetTransaction();
 
     const iota = client.getIotaClient();

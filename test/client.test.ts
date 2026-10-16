@@ -6,7 +6,11 @@ describe("Interacting with VirtueClient", () => {
   // Instantiate Client
   const walletAddress =
     "0x08e00db614b1024014b33f86e9d0baf76a48649b317d1517536502c521d20322";
-  const client = new VirtueClient({ sender: walletAddress });
+  // Lazer is token-gated; the SDK never reads the environment itself.
+  const client = new VirtueClient({
+    sender: walletAddress,
+    pythLazer: { apiKey: process.env.PYTH_LAZER_TOKEN },
+  });
 
   // it("test ManagePosition() function (create)", async () => {
   //   const tx = await client.buildManagePositionTransaction({
@@ -40,6 +44,9 @@ describe("Interacting with VirtueClient", () => {
     assert(prices.IOTA !== undefined, "IOTA has no price");
     assert(prices.stIOTA !== undefined, "stIOTA has no price");
     assert(prices.vIOTA !== undefined, "vIOTA has no price");
+    assert(prices.iBTC !== undefined, "iBTC has no price");
+    // BTC is worth vastly more than IOTA; a misrouted feed would not be.
+    expect(prices.iBTC).toBeGreaterThan(1_000);
     expect(prices.stIOTA).toBeGreaterThan(prices.IOTA);
     expect(prices.vIOTA).toBeGreaterThan(prices.IOTA);
     client.resetTransaction();

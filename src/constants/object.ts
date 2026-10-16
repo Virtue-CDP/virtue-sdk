@@ -39,15 +39,23 @@ export type ConfigType = {
   VCERT_METADATA_OBJ: SharedObjectRef;
 
   /**
-   * Switchboard On-Demand. Optional: where these are absent `aggregatePrices`
-   * skips the crank and the `switchboard_rule::feed` call entirely, which is what
-   * testnet does — there is no deployment there.
+   * Pyth Lazer. Optional: where these are absent `aggregatePrices` skips the
+   * verify and the `pyth_lazer_rule::feed` call entirely, which is what testnet
+   * does — there is no rule deployment there.
    */
-  SWITCHBOARD_PACKAGE_ID?: string;
-  SWITCHBOARD_RULE_PACKAGE_ID?: string;
-  SWITCHBOARD_RULE_CONFIG_OBJ?: SharedObjectRef;
-  /** Coin symbol -> the one `Aggregator` object `feed<T>` accepts for it. */
-  SWITCHBOARD_AGGREGATORS?: Partial<Record<COLLATERAL_COIN, string>>;
+  /** Pyth's `pyth_lazer` package; the verify entry is called here. */
+  PYTH_LAZER_PACKAGE_ID?: string;
+  /** Pyth's shared Lazer `State`, holding the trusted signer set. */
+  PYTH_LAZER_STATE_OBJ?: SharedObjectRef;
+  PYTH_LAZER_RULE_PACKAGE_ID?: string;
+  PYTH_LAZER_RULE_CONFIG_OBJ?: SharedObjectRef;
+  /** Coin symbol -> the Lazer feed id `pyth_lazer_rule` reads for it. */
+  PYTH_LAZER_FEED_IDS?: Partial<Record<COLLATERAL_COIN, number>>;
+  /**
+   * The Lazer channel to request. Must be one the token is entitled to:
+   * Virtue's grant allows nothing faster than `fixed_rate@1000ms`.
+   */
+  PYTH_LAZER_CHANNEL?: string;
 
   POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
   POINT_MANAGER_OBJ: SharedObjectRef;
@@ -65,6 +73,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA:
         "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
+      iBTC: "0x387c459c5c947aac7404e53ba69541c5d64f3cf96f3bc515e7f8a067fb725b54::ibtc::IBTC",
       vIOTA:
         "0xe4abf8b6183c106282addbfb8483a043e1a60f1fd3dd91fb727fa284306a27fd::cert::CERT",
     },
@@ -158,19 +167,27 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       mutable: false,
     },
 
-    SWITCHBOARD_PACKAGE_ID:
-      "0x8650249db8ffcffe8eb08b0696a8cb71e325f2afb9abc646f45344077b073ba1",
-    SWITCHBOARD_RULE_PACKAGE_ID:
-      "0x39fb7adf0abd75b31868e17706b8600cc943bc27422fb582f6e14282029cd5f0",
-    SWITCHBOARD_RULE_CONFIG_OBJ: {
+    PYTH_LAZER_PACKAGE_ID:
+      "0x8aa43bd5c14eac8de636e2106f53a1cc9dc2bc0e1a1ad51c9846a0b167552e29",
+    PYTH_LAZER_STATE_OBJ: {
       objectId:
-        "0xa0c7b527f35476c51938d0ffd144b83cd7ee5091f516327228391b77e03afa3e",
-      initialSharedVersion: 759082916,
+        "0xbfaaf85f467dd5d9af0f064afb61ceb8c5f0f27c480d4a68ccd4d85cf1c634fb",
+      initialSharedVersion: 698963331,
       mutable: false,
     },
-    SWITCHBOARD_AGGREGATORS: {
-      IOTA: "0x7c16ffdac553a4816db57e5e2cfbba8245337f2983b4ffb4dd944493a530c556",
+    PYTH_LAZER_RULE_PACKAGE_ID:
+      "0x24e3bae5be0985b32336a5cea2ff95304b1d5cf99dc1f28d6e0acb3eb65209bd",
+    PYTH_LAZER_RULE_CONFIG_OBJ: {
+      objectId:
+        "0xb37d447c7fa5ac24c740ef49abe828ce34c6d2bf227879034a97f94afbb0e6b4",
+      initialSharedVersion: 821170473,
+      mutable: false,
     },
+    PYTH_LAZER_FEED_IDS: {
+      IOTA: 70,
+      iBTC: 1,
+    },
+    PYTH_LAZER_CHANNEL: "fixed_rate@1000ms",
 
     POINT_GLOBAL_CONFIG_OBJ: {
       objectId:
@@ -234,6 +251,20 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           },
         ],
       },
+      iBTC: {
+        priceAggregater: {
+          objectId:
+            "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
+          initialSharedVersion: 172291113,
+          mutable: false,
+        },
+        vault: {
+          objectId:
+            "0xcc094d9e3b491b0c943bb18daf07a49bd951f34688f9610d90982de06fc0c5c9",
+          initialSharedVersion: 172291112,
+          mutable: true,
+        },
+      },
       vIOTA: {
         priceAggregater: {
           objectId:
@@ -256,6 +287,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA:
         "0x14f9e69c0076955d5a056260c9667edab184650dba9919f168a37030dd956dc6::cert::CERT",
+      iBTC: "",
       vIOTA: "",
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID:
@@ -376,6 +408,20 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           mutable: true,
         },
         rewarders: [],
+      },
+      // No iBTC on testnet: empty refs, like vIOTA below. The ids iBTC used to
+      // carry here were mainnet objects, which a testnet RPC cannot resolve.
+      iBTC: {
+        priceAggregater: {
+          objectId: "",
+          initialSharedVersion: 0,
+          mutable: false,
+        },
+        vault: {
+          objectId: "0",
+          initialSharedVersion: 0,
+          mutable: false,
+        },
       },
       vIOTA: {
         priceAggregater: {

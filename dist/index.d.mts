@@ -4,8 +4,8 @@ import { Keypair } from '@iota/iota-sdk/cryptography';
 import * as superstruct from 'superstruct';
 import { Infer } from 'superstruct';
 
-type COIN = "VUSD" | "IOTA" | "stIOTA" | "vIOTA";
-type COLLATERAL_COIN = "IOTA" | "stIOTA" | "vIOTA";
+type COIN = "VUSD" | "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
+type COLLATERAL_COIN = "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
 
 type Float = {
     fields: {
@@ -130,15 +130,23 @@ type ConfigType = {
     VCERT_NATIVE_POOL_OBJ: SharedObjectRef;
     VCERT_METADATA_OBJ: SharedObjectRef;
     /**
-     * Switchboard On-Demand. Optional: where these are absent `aggregatePrices`
-     * skips the crank and the `switchboard_rule::feed` call entirely, which is what
-     * testnet does — there is no deployment there.
+     * Pyth Lazer. Optional: where these are absent `aggregatePrices` skips the
+     * verify and the `pyth_lazer_rule::feed` call entirely, which is what testnet
+     * does — there is no rule deployment there.
      */
-    SWITCHBOARD_PACKAGE_ID?: string;
-    SWITCHBOARD_RULE_PACKAGE_ID?: string;
-    SWITCHBOARD_RULE_CONFIG_OBJ?: SharedObjectRef;
-    /** Coin symbol -> the one `Aggregator` object `feed<T>` accepts for it. */
-    SWITCHBOARD_AGGREGATORS?: Partial<Record<COLLATERAL_COIN, string>>;
+    /** Pyth's `pyth_lazer` package; the verify entry is called here. */
+    PYTH_LAZER_PACKAGE_ID?: string;
+    /** Pyth's shared Lazer `State`, holding the trusted signer set. */
+    PYTH_LAZER_STATE_OBJ?: SharedObjectRef;
+    PYTH_LAZER_RULE_PACKAGE_ID?: string;
+    PYTH_LAZER_RULE_CONFIG_OBJ?: SharedObjectRef;
+    /** Coin symbol -> the Lazer feed id `pyth_lazer_rule` reads for it. */
+    PYTH_LAZER_FEED_IDS?: Partial<Record<COLLATERAL_COIN, number>>;
+    /**
+     * The Lazer channel to request. Must be one the token is entitled to:
+     * Virtue's grant allows nothing faster than `fixed_rate@1000ms`.
+     */
+    PYTH_LAZER_CHANNEL?: string;
     POINT_GLOBAL_CONFIG_OBJ: SharedObjectRef;
     POINT_MANAGER_OBJ: SharedObjectRef;
     STABILITY_POOL_TABLE_ID: string;
@@ -147,6 +155,21 @@ type ConfigType = {
 };
 declare const CONFIG: Record<"mainnet" | "testnet", ConfigType>;
 
+/**
+ * Access to Pyth Lazer. Lazer is token-gated, and the token is a secret: a
+ * browser must not hold it. A dApp should point `endpoint` at its own server
+ * route that forwards `POST /v1/latest_price` with the token attached, and pass
+ * no `apiKey`. A server-side caller can pass `apiKey` directly.
+ */
+type PythLazerAccess = {
+    /** Sent as `Authorization: Bearer <apiKey>` when given. */
+    apiKey?: string;
+    /**
+     * Base URL(s) serving `POST /v1/latest_price`, tried in order until one
+     * returns an update. Defaults to Pyth's own hosts.
+     */
+    endpoint?: string | string[];
+};
 declare class VirtueClient {
     /**
      * @description a TS wrapper over Virtue CDP client.
@@ -158,10 +181,13 @@ declare class VirtueClient {
     transaction: Transaction;
     sender: string;
     config: ConfigType;
+    private pythLazer;
     constructor(inputs?: {
         network?: "mainnet" | "testnet";
         rpcUrl?: string;
         sender?: string;
+        /** Required to price anything: IOTA comes from Pyth Lazer alone. */
+        pythLazer?: PythLazerAccess;
     });
     /**
      * @description Get this.iotaClient
@@ -169,14 +195,23 @@ declare class VirtueClient {
     getIotaClient(): IotaClient;
     getAllCollateralSymbol(): COLLATERAL_COIN[];
     /**
-     * @description Price every collateral by dry-running `aggregatePrices` and
-     * reading the emitted `PriceAggregated` events.
+     * @description Price every collateral by dev-inspecting its aggregation and
+     * reading the emitted `PriceAggregated` event.
      *
-     * A symbol is **absent** from the result when no oracle rule could price it —
-     * `aggregatePrices` leaves such a symbol out of the transaction, so it emits
-     * no event, and the derived symbols go with it since they are computed from
-     * the IOTA price. The return type is `Partial` to say so; treat a missing
-     * entry as "no price available right now", never as zero.
+     * Each collateral is inspected on its own — a derived one together with the
+     * basic price it needs — so nothing that fails to price can hide another
+     * price: not iBTC hiding IOTA, and not a broken vIOTA pool hiding IOTA or
+     * stIOTA.
+     *
+     * A symbol is **absent** from the result when no oracle rule could price it,
+     * and the derived symbols go with it when their basic price is missing. The
+     * return type is `Partial` to say so; treat a missing entry as "no price
+     * available right now", never as zero.
+     *
+     * A symbol whose inspection could not be performed at all (an RPC failure) is
+     * left out the same way, as in `aggregatePrices`. If every inspection that
+     * actually reached the RPC failed that way, the RPC is unreachable, and that
+     * is thrown rather than reported as an empty set of prices.
      */
     getCollateralPrices(): Promise<Partial<Record<COLLATERAL_COIN, number>>>;
     /**
@@ -276,41 +311,58 @@ declare class VirtueClient {
      * again. Probing and refetching would leave a window where the preflight
      * passes and the real fetch fails, throwing only after the transaction had
      * been written to — and it would pay for the same work twice.
+     *
+     * Each basic symbol gets its own Lazer request. Lazer rejects a whole request
+     * when any one feed in it is not entitled, so a shared request would let one
+     * feed's entitlement decide every price.
      */
     private prepareOracleUpdates;
     /**
-     * @description Whether the Switchboard rule is wired up for a symbol at all.
-     *
-     * Config alone decides whether the rule is *added*. It abstains on a stale
-     * aggregator rather than aborting, so adding it costs nothing — but note it is
-     * not unconditionally fail-soft: the deployed rule aborts on a coin type it
-     * has no mapping for (`err_unsupported_coin_type`) or an aggregator that is
-     * not the one registered for that coin (`err_invalid_aggregator`). Live config
-     * is aligned today, and `canPriceCollateral` dev-inspects the real aggregation
-     * rather than trusting that, so a drifted rule config surfaces as "cannot
-     * price" instead of a failed transaction.
+     * @description The configured collaterals that have an oracle path at all:
+     * the basic symbols, and the symbols derived from one of them.
      */
-    private switchboardRuleFeeds;
+    private priceableSymbols;
     /**
-     * @description Whether the prepared data can actually price this collateral.
+     * @description Whether the Lazer rule is wired up for a symbol at all.
      *
-     * Answered by building the aggregation and dev-inspecting it, rather than by
-     * reasoning about which rules are configured. Configuration is not the
-     * question — being wired up to Switchboard says nothing about whether its
-     * aggregator still holds a result the rule will accept. With nothing cranked
-     * and a stale aggregator the rule abstains, `aggregate` fails its threshold
-     * with `err_total_weight_not_enough`, and a predicate that had said "yes"
-     * would already have written a doomed position onto the caller's transaction.
-     *
-     * Running the real thing also covers what a predicate would miss: a rule
-     * config drifted from the aggregator it is asked about, or any future rule
-     * with its own abort conditions.
+     * Config alone decides whether the rule is *added*. The rule abstains on a
+     * stale or incomplete update rather than aborting, but it aborts on a coin type
+     * it has no feed id for (`EUnsupportedCoinType`). Live config is aligned today,
+     * and `canPriceCollateral` dev-inspects the real aggregation rather than
+     * trusting that, so a drifted rule config surfaces as "cannot price" instead
+     * of a failed transaction.
+     */
+    private lazerRuleFeeds;
+    /**
+     * @description Build the aggregation for `symbols` on a transaction of its own
+     * and dev-inspect it. Returns `null` when the prepared data cannot even build
+     * a price for every symbol asked about (nothing to inspect).
      *
      * Built on a transaction of its own. Assigning a scratch transaction to
      * `this.transaction` for the duration would expose it through
      * `getTransaction()` and, worse, let a concurrent build or
      * `resetTransaction()` land in that window only to be overwritten when this
      * restored the old one.
+     *
+     * Transport failures propagate; callers decide what they mean.
+     */
+    private inspectAggregation;
+    /**
+     * @description Whether the prepared data can actually price this collateral.
+     *
+     * Answered by building the aggregation and dev-inspecting it, rather than by
+     * reasoning about which rules are configured. Configuration is not the
+     * question — having a Lazer update says nothing about whether the rule will
+     * accept it. An update signed too long ago, or one whose confidence band is
+     * wider than the rule's gate, makes the rule abstain, `aggregate` fails its
+     * threshold with `err_total_weight_not_enough`, and a predicate that had said
+     * "yes" would already have written a doomed position onto the caller's
+     * transaction. The same inspection runs the on-chain verify, so an update the
+     * verifier rejects is caught here too.
+     *
+     * Running the real thing also covers what a predicate would miss: a rule
+     * config drifted from the coin types asked about, or any future rule with its
+     * own abort conditions.
      *
      * A dev-inspection that *executes* and reports failure means no rule can
      * price this collateral. A dev-inspection that could not run at all means
@@ -319,52 +371,59 @@ declare class VirtueClient {
      */
     private canPriceCollateral;
     /**
-     * @description Fetch signed Switchboard responses and keep the ones that will
-     * actually validate on chain, without touching the current transaction.
+     * @description Fetch one signed Lazer update for `feedId`, without touching
+     * the current transaction.
      *
-     * Switchboard is on-demand, not push: `Aggregator.current_result` only changes
-     * when someone submits a signed oracle response. Left alone the IOTA mainnet
-     * feed sat 330 days stale, so the crank belongs in the same PTB as the read.
+     * Lazer is pull-based: nothing is stored on chain, so the signed update has to
+     * travel in the same PTB as the read, through
+     * `pyth_lazer::parse_and_verify_le_ecdsa_update`.
      *
-     * Two things make this awkward, both handled here:
+     * No on-chain check happens here. Whether the update verifies and prices is
+     * settled by the single dev-inspection of the real aggregation that every
+     * caller runs anyway, which includes the verify; probing the verify alone
+     * first would only spend time inside the rule's freshness window.
      *
-     * - Most oracles on the IOTA queues are broken — their signature no longer
-     *   recovers to the `secp256k1_key` in their on-chain `Oracle` object, so
-     *   `aggregator_submit_result_action::validate` aborts. Crossbar hands out one
-     *   at random per request, so a plain crank succeeds about a quarter of the
-     *   time. `numSignatures` asks for the whole set instead.
-     * - A PTB is all-or-nothing, so one broken oracle would take the entire price
-     *   read — and whatever borrow or liquidation is bundled with it — down too.
-     *   Each response is therefore devInspected on its own and only the survivors
-     *   are kept.
-     *
-     * Never throws: a crossbar outage, a slow endpoint, a malformed response or an
-     * RPC failure all come back `null`. Switchboard is one rule among several, so
-     * raising here would take down price reads that the others could have served.
+     * Endpoints are tried in order. Never throws: no access configured, an
+     * endpoint outage, a slow or unauthorised response or malformed bytes all
+     * move on to the next endpoint, and come back `null` when none answered.
      */
-    private prepareSwitchboard;
+    private prepareLazer;
     /**
-     * @description Append one `aggregator_submit_result_action::run` call. Pure —
-     * no I/O — so replaying a response that already passed its probe cannot fail.
-     * Returns false for a signature that is not the 65 bytes the action expects.
+     * @description Pull the signed `leEcdsa` bytes out of a `/v1/latest_price`
+     * response body, or `null` when it carries none. Pure — no I/O.
+     *
+     * `Buffer` is a Node global that browser bundles do not provide, and a
+     * ReferenceError here would be swallowed by the fail-soft catch around
+     * preparation — quietly disabling the only price source there is, for every
+     * dApp consumer. `fromHEX` works in both runtimes.
      */
-    private addSwitchboardSubmission;
+    private lazerUpdateFromResponse;
     /**
-     * @description Add the prepared Switchboard submissions to the current
-     * transaction, so the aggregator is fresh before anything in this same PTB
-     * reads it. Returns how many were added; zero simply means the rule will read
-     * whatever is already on chain and abstain if that is stale.
+     * @description Append the Lazer verify call and return the verified `Update`.
+     * Pure — no I/O.
      */
-    private applySwitchboard;
+    private verifyLazerUpdate;
     /**
-     * @description Get a price result
-     * @param collateral coin symbol, e.g "IOTA"
-     * @return [PriceResult]
+     * @description Price every collateral that can be priced right now, into the
+     * current transaction.
+     *
+     * Each collateral is dev-inspected on its own first — a derived one together
+     * with the basic price it needs — and only those that price are added,
+     * because a PTB is all-or-nothing: one abort would otherwise take every other
+     * price, and whatever the caller bundles with them, down too. A broken vIOTA
+     * pool therefore leaves IOTA and stIOTA in place. Never throws — a collateral
+     * whose inspection could not be performed is left out.
+     *
+     * @return PriceResult per collateral that could be priced
      */
     aggregatePrices(): Promise<Partial<Record<COLLATERAL_COIN, TransactionResult>>>;
     /**
-     * @description The transaction-building half of `aggregatePrices`, working
-     * only from data already fetched and validated by `prepareOracleUpdates`.
+     * @description The transaction-building half of the price calls, working only
+     * from data already fetched by `prepareOracleUpdates`. Pure — no I/O.
+     *
+     * Builds only what `symbols` need: each requested symbol's basic symbol, then
+     * the requested derived symbols. A borrow against IOTA therefore carries
+     * nothing of iBTC's, and the reverse.
      *
      * Kept separate so a position build can settle whether its collateral is
      * priceable before writing anything, then build from that exact same prepared
@@ -483,12 +542,11 @@ declare class VirtueClient {
      * @returns Transaction
      *
      * **Sign and execute this promptly.** Borrowing or withdrawing embeds a signed
-     * Switchboard response, and the queue only accepts one for
-     * `max_staleness_seconds` after the oracle signed it — 150s on the configured
-     * queue, counted from the signing time rather than from now, so the usable
-     * window is shorter than that. Past it,
-     * `aggregator_submit_result_action::validate` aborts and takes the whole
-     * transaction with it. A transaction held that long must be rebuilt, not
+     * Pyth Lazer update, and `pyth_lazer_rule` only accepts one within its
+     * freshness tolerance of the moment Pyth signed it — 30s by default, counted
+     * from the signing time rather than from now. Past it the rule abstains,
+     * `aggregate` aborts with `err_total_weight_not_enough`, and the whole
+     * transaction goes with it. A transaction held that long must be rebuilt, not
      * resubmitted. This deadline is inherent to feeding a price on chain.
      *
      * Either the whole position is built or the transaction is left exactly as it
@@ -598,4 +656,4 @@ declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
 
-export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject };
+export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type PythLazerAccess, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject };
