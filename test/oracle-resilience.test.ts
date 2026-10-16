@@ -185,6 +185,72 @@ describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
     expect(prices.iBTC).toBeGreaterThan(0);
   }, 90_000);
 
+  /** Whether a dev-inspected transaction calls `module::fn`. */
+  const hasCall = (args: any, module: string, fn: string) =>
+    (args.transactionBlock?.getData?.().commands ?? []).some(
+      (c: any) => c.MoveCall?.module === module && c.MoveCall?.function === fn,
+    );
+
+  it("keeps IOTA and stIOTA priced when vIOTA's own rule fails", async () => {
+    const client = new VirtueClient({ pythLazer });
+    const iota = client.getIotaClient();
+    const realInspect = iota.devInspectTransactionBlock.bind(iota);
+    // Stand in for a broken vcert pool: any inspection that reaches it fails.
+    vi.spyOn(iota, "devInspectTransactionBlock").mockImplementation(
+      async (args: any) => {
+        if (hasCall(args, "vcert_rule", "feed")) {
+          return { effects: { status: { status: "failure" } }, events: [] } as any;
+        }
+        return realInspect(args);
+      },
+    );
+
+    const prices = await client.getCollateralPrices();
+    expect(prices.vIOTA).toBeUndefined();
+    expect(prices.IOTA).toBeGreaterThan(0);
+    expect(prices.stIOTA).toBeGreaterThan(0);
+
+    client.resetTransaction();
+    const results = await client.aggregatePrices();
+    expect(results.vIOTA).toBeUndefined();
+    expect(results.IOTA).toBeDefined();
+    expect(moveCallsOf(client.getTransaction())).not.toContain(
+      "vcert_rule::feed",
+    );
+  }, 90_000);
+
+  it("drops only the collateral whose inspection hit an RPC failure", async () => {
+    const client = new VirtueClient({ pythLazer });
+    const iota = client.getIotaClient();
+    const realInspect = iota.devInspectTransactionBlock.bind(iota);
+    vi.spyOn(iota, "devInspectTransactionBlock").mockImplementation(
+      async (args: any) => {
+        const ibtc = (args.transactionBlock?.getData?.().commands ?? []).some(
+          (c: any) =>
+            (c.MoveCall?.typeArguments ?? []).some((t: string) =>
+              t.includes("::ibtc::IBTC"),
+            ),
+        );
+        if (ibtc) throw new Error("ECONNRESET");
+        return realInspect(args);
+      },
+    );
+    const prices = await client.getCollateralPrices();
+    expect(prices.iBTC).toBeUndefined();
+    expect(prices.IOTA).toBeGreaterThan(0);
+  }, 90_000);
+
+  it("throws rather than reporting no prices when the RPC is unreachable", async () => {
+    const client = new VirtueClient({ pythLazer });
+    vi.spyOn(
+      client.getIotaClient(),
+      "devInspectTransactionBlock",
+    ).mockRejectedValue(new Error("ECONNRESET"));
+    await expect(client.getCollateralPrices()).rejects.toThrow(
+      /transport failure, not an oracle one/,
+    );
+  }, 90_000);
+
   it("falls back to the next endpoint when one is down", async () => {
     const client = new VirtueClient({
       pythLazer: {

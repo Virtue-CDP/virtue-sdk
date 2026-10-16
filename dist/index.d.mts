@@ -195,17 +195,23 @@ declare class VirtueClient {
     getIotaClient(): IotaClient;
     getAllCollateralSymbol(): COLLATERAL_COIN[];
     /**
-     * @description Price every collateral by dry-running `aggregatePrices` and
-     * reading the emitted `PriceAggregated` events.
+     * @description Price every collateral by dev-inspecting its aggregation and
+     * reading the emitted `PriceAggregated` event.
      *
-     * Each price group (a basic symbol and the symbols derived from it) is
-     * inspected on its own, so iBTC failing to price cannot hide the IOTA prices
-     * or the reverse.
+     * Each collateral is inspected on its own — a derived one together with the
+     * basic price it needs — so nothing that fails to price can hide another
+     * price: not iBTC hiding IOTA, and not a broken vIOTA pool hiding IOTA or
+     * stIOTA.
      *
      * A symbol is **absent** from the result when no oracle rule could price it,
-     * and the derived symbols go with it since they are computed from the IOTA
-     * price. The return type is `Partial` to say so; treat a missing
-     * entry as "no price available right now", never as zero.
+     * and the derived symbols go with it when their basic price is missing. The
+     * return type is `Partial` to say so; treat a missing entry as "no price
+     * available right now", never as zero.
+     *
+     * A symbol whose inspection could not be performed at all (an RPC failure) is
+     * left out the same way, as in `aggregatePrices`. If *every* inspection
+     * failed that way the RPC is unreachable, and that is thrown rather than
+     * reported as an empty set of prices.
      */
     getCollateralPrices(): Promise<Partial<Record<COLLATERAL_COIN, number>>>;
     /**
@@ -312,10 +318,10 @@ declare class VirtueClient {
      */
     private prepareOracleUpdates;
     /**
-     * @description The price groups: each basic symbol with the configured
-     * symbols derived from it. A group is priced, probed and fails as a unit.
+     * @description The configured collaterals that have an oracle path at all:
+     * the basic symbols, and the symbols derived from one of them.
      */
-    private priceGroups;
+    private priceableSymbols;
     /**
      * @description Whether the Lazer rule is wired up for a symbol at all.
      *
@@ -401,10 +407,12 @@ declare class VirtueClient {
      * @description Price every collateral that can be priced right now, into the
      * current transaction.
      *
-     * Each price group is dev-inspected first and only groups that price are
-     * added, because a PTB is all-or-nothing: one group's abort would otherwise
-     * take every other price, and whatever the caller bundles with them, down
-     * too. Never throws — a group that cannot be checked is left out.
+     * Each collateral is dev-inspected on its own first — a derived one together
+     * with the basic price it needs — and only those that price are added,
+     * because a PTB is all-or-nothing: one abort would otherwise take every other
+     * price, and whatever the caller bundles with them, down too. A broken vIOTA
+     * pool therefore leaves IOTA and stIOTA in place. Never throws — a collateral
+     * whose inspection could not be performed is left out.
      *
      * @return PriceResult per collateral that could be priced
      */

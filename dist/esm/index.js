@@ -510,41 +510,57 @@ var VirtueClient = class {
   }
   /* ----- Query ----- */
   /**
-   * @description Price every collateral by dry-running `aggregatePrices` and
-   * reading the emitted `PriceAggregated` events.
+   * @description Price every collateral by dev-inspecting its aggregation and
+   * reading the emitted `PriceAggregated` event.
    *
-   * Each price group (a basic symbol and the symbols derived from it) is
-   * inspected on its own, so iBTC failing to price cannot hide the IOTA prices
-   * or the reverse.
+   * Each collateral is inspected on its own — a derived one together with the
+   * basic price it needs — so nothing that fails to price can hide another
+   * price: not iBTC hiding IOTA, and not a broken vIOTA pool hiding IOTA or
+   * stIOTA.
    *
    * A symbol is **absent** from the result when no oracle rule could price it,
-   * and the derived symbols go with it since they are computed from the IOTA
-   * price. The return type is `Partial` to say so; treat a missing
-   * entry as "no price available right now", never as zero.
+   * and the derived symbols go with it when their basic price is missing. The
+   * return type is `Partial` to say so; treat a missing entry as "no price
+   * available right now", never as zero.
+   *
+   * A symbol whose inspection could not be performed at all (an RPC failure) is
+   * left out the same way, as in `aggregatePrices`. If *every* inspection
+   * failed that way the RPC is unreachable, and that is thrown rather than
+   * reported as an empty set of prices.
    */
   async getCollateralPrices() {
     const prepared = await this.prepareOracleUpdates();
     const pricePrecision = 10 ** 9;
-    const groups = await Promise.all(
-      this.priceGroups().map(async (group) => {
-        const inspect = await this.inspectAggregation(prepared, group);
-        if (!inspect || inspect.effects.status.status !== "success") return {};
-        return group.reduce(
-          (result, coinSymbol) => {
-            const coinType = this.config.COIN_TYPES[coinSymbol];
-            const priceEvent = (inspect.events ?? []).findLast(
-              (e) => normalizeStructTag(e.type).includes(normalizeStructTag(coinType))
-            );
-            return priceEvent ? {
-              ...result,
-              [coinSymbol]: +priceEvent.parsedJson.result / pricePrecision
-            } : result;
-          },
-          {}
-        );
-      })
+    const symbols = this.priceableSymbols();
+    const settled = await Promise.allSettled(
+      symbols.map((symbol) => this.inspectAggregation(prepared, [symbol]))
     );
-    return Object.assign({}, ...groups);
+    const rejected = settled.filter((r) => r.status === "rejected");
+    if (symbols.length > 0 && rejected.length === symbols.length) {
+      throw new Error(
+        "Could not read collateral prices: no RPC dev-inspection could be performed. This is a transport failure, not an oracle one.",
+        { cause: rejected[0].reason }
+      );
+    }
+    return symbols.reduce(
+      (result, coinSymbol, i) => {
+        const outcome = settled[i];
+        if (outcome.status !== "fulfilled") return result;
+        const inspect = outcome.value;
+        if (!inspect || inspect.effects.status.status !== "success") {
+          return result;
+        }
+        const coinType = this.config.COIN_TYPES[coinSymbol];
+        const priceEvent = (inspect.events ?? []).findLast(
+          (e) => normalizeStructTag(e.type).includes(normalizeStructTag(coinType))
+        );
+        return priceEvent ? {
+          ...result,
+          [coinSymbol]: +priceEvent.parsedJson.result / pricePrecision
+        } : result;
+      },
+      {}
+    );
   }
   /**
    * @description Get all vault objects
@@ -1028,16 +1044,12 @@ var VirtueClient = class {
     return { lazer };
   }
   /**
-   * @description The price groups: each basic symbol with the configured
-   * symbols derived from it. A group is priced, probed and fails as a unit.
+   * @description The configured collaterals that have an oracle path at all:
+   * the basic symbols, and the symbols derived from one of them.
    */
-  priceGroups() {
-    const symbols = this.getAllCollateralSymbol();
-    return BASIC_PRICE_SYMBOLS.filter((basic) => symbols.includes(basic)).map(
-      (basic) => [
-        basic,
-        ...symbols.filter((symbol) => DERIVED_FROM[symbol] === basic)
-      ]
+  priceableSymbols() {
+    return this.getAllCollateralSymbol().filter(
+      (symbol) => BASIC_PRICE_SYMBOLS.includes(basicSymbolOf(symbol))
     );
   }
   /**
@@ -1196,20 +1208,22 @@ var VirtueClient = class {
    * @description Price every collateral that can be priced right now, into the
    * current transaction.
    *
-   * Each price group is dev-inspected first and only groups that price are
-   * added, because a PTB is all-or-nothing: one group's abort would otherwise
-   * take every other price, and whatever the caller bundles with them, down
-   * too. Never throws — a group that cannot be checked is left out.
+   * Each collateral is dev-inspected on its own first — a derived one together
+   * with the basic price it needs — and only those that price are added,
+   * because a PTB is all-or-nothing: one abort would otherwise take every other
+   * price, and whatever the caller bundles with them, down too. A broken vIOTA
+   * pool therefore leaves IOTA and stIOTA in place. Never throws — a collateral
+   * whose inspection could not be performed is left out.
    *
    * @return PriceResult per collateral that could be priced
    */
   async aggregatePrices() {
     const prepared = await this.prepareOracleUpdates();
     const verdicts = await Promise.all(
-      this.priceGroups().map(async (group) => {
+      this.priceableSymbols().map(async (symbol) => {
         try {
-          const inspect = await this.inspectAggregation(prepared, group);
-          return inspect?.effects.status.status === "success" ? group : [];
+          const inspect = await this.inspectAggregation(prepared, [symbol]);
+          return inspect?.effects.status.status === "success" ? [symbol] : [];
         } catch {
           return [];
         }
