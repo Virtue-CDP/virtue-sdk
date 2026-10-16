@@ -154,25 +154,25 @@ describe("PSM on chain", () => {
     expect(client.getTransaction().getData().commands).toHaveLength(0);
   });
 
-  it("leaves a kept transaction untouched when the balance is short", async () => {
-    // Ask for one unit more than the wallet holds, so the balance check fails
-    // whatever it holds; nothing of the swap (the partner request included)
-    // may have been written by then.
+  it("reports a short balance when the transaction is built", async () => {
+    // Ask for one unit more than the wallet holds. Coin selection is the
+    // `coinWithBalance` intent's, resolved at build time, so the shortfall
+    // surfaces there rather than while the swap is being composed.
     const usdt0 = await client.getIotaClient().getBalance({
       owner: walletAddress,
       coinType: client.config.PSM_POOLS!.USDT0!.coinType,
     });
     client.resetTransaction();
-    await expect(
-      client.buildPsmSwapTransaction({
-        coin: "USDT0",
-        direction: "in",
-        amount: (BigInt(usdt0.totalBalance) + 1n).toString(),
-        accountObj: walletAddress,
-        keepTransaction: true,
-      }),
-    ).rejects.toThrow(/Not enough balance/);
-    expect(client.getTransaction().getData().commands).toHaveLength(0);
+    const tx = await client.buildPsmSwapTransaction({
+      coin: "USDT0",
+      direction: "in",
+      amount: (BigInt(usdt0.totalBalance) + 1n).toString(),
+      accountObj: walletAddress,
+      keepTransaction: true,
+    });
+    await expect(tx.build({ client: client.getIotaClient() })).rejects.toThrow(
+      /Not enough coins/,
+    );
     client.resetTransaction();
   });
 

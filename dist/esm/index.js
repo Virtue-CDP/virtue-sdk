@@ -1,5 +1,6 @@
 // src/client.ts
 import {
+  coinWithBalance,
   Transaction
 } from "@iota/iota-sdk/transactions";
 import {
@@ -1066,6 +1067,15 @@ var VirtueClient = class _VirtueClient {
         arguments: [zero]
       });
       return out2;
+    }
+    if (total !== void 0) {
+      const coin = this.transaction.add(
+        coinWithBalance({ type: coinType, balance: total })
+      );
+      return this.transaction.splitCoins(
+        coin,
+        amounts.map((amount) => this.transaction.pure.u64(amount))
+      );
     }
     const userCoins = [];
     let held = 0n;

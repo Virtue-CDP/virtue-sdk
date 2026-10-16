@@ -1,4 +1,5 @@
 import {
+  coinWithBalance,
   Transaction,
   TransactionArgument,
   TransactionResult,
@@ -801,8 +802,23 @@ export class VirtueClient {
       return out;
     }
 
-    // `getCoins` is paginated: read until the coins cover the total, or all of
-    // them when the total is not known.
+    // A known amount is left to the SDK's `coinWithBalance` intent, which picks,
+    // merges and splits the sender's coins when the transaction is built. That
+    // also means a shortfall surfaces at build time, not halfway through
+    // writing a composed transaction.
+    if (total !== undefined) {
+      const coin = this.transaction.add(
+        coinWithBalance({ type: coinType, balance: total }),
+      );
+      return this.transaction.splitCoins(
+        coin,
+        amounts.map((amount) => this.transaction.pure.u64(amount as string)),
+      );
+    }
+
+    // An amount only known on chain (e.g. a debt read in the same PTB) cannot
+    // be handed to `coinWithBalance`, so the sender's coins are merged here.
+    // `getCoins` is paginated: read all of them.
     const userCoins: Awaited<ReturnType<IotaClient["getCoins"]>>["data"] = [];
     let held = 0n;
     let cursor: string | null | undefined = undefined;
