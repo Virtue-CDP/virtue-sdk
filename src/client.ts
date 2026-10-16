@@ -40,9 +40,9 @@ const LAZER_FETCH_TIMEOUT_MS = 5_000;
 /**
  * Pyth's Lazer HTTP API hosts, tried in order until one answers with an update.
  * Each serves the same signed data. Override with `pythLazer.endpoint` to go
- * through a proxy.
+ * through a proxy; exported so that proxy can use the same hosts.
  */
-const DEFAULT_LAZER_ENDPOINTS = [
+export const DEFAULT_LAZER_ENDPOINTS = [
   "https://pyth-lazer-0.dourolabs.app",
   "https://pyth-lazer-1.dourolabs.app",
   "https://pyth-lazer-2.dourolabs.app",
@@ -52,8 +52,11 @@ const DEFAULT_LAZER_ENDPOINTS = [
  * Properties requested in every Lazer update. `pyth_lazer_rule` abstains on an
  * update missing `confidence` or `feedUpdateTimestamp`, and reads
  * `marketSession` when present, so trimming this list silently loses the price.
+ *
+ * Exported so a proxy in front of Lazer can request exactly this list rather
+ * than keep a copy that drifts when the SDK needs another property.
  */
-const LAZER_PROPERTIES = [
+export const LAZER_PROPERTIES = [
   "price",
   "exponent",
   "confidence",

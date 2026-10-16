@@ -1947,5 +1947,7 @@ var VirtueClient = class {
 
 
 
-exports.COIN_DECIMALS = COIN_DECIMALS; exports.CONFIG = CONFIG; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
+
+
+exports.COIN_DECIMALS = COIN_DECIMALS; exports.CONFIG = CONFIG; exports.DEFAULT_LAZER_ENDPOINTS = DEFAULT_LAZER_ENDPOINTS; exports.LAZER_PROPERTIES = LAZER_PROPERTIES; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
 //# sourceMappingURL=index.js.map

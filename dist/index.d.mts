@@ -156,6 +156,21 @@ type ConfigType = {
 declare const CONFIG: Record<"mainnet" | "testnet", ConfigType>;
 
 /**
+ * Pyth's Lazer HTTP API hosts, tried in order until one answers with an update.
+ * Each serves the same signed data. Override with `pythLazer.endpoint` to go
+ * through a proxy; exported so that proxy can use the same hosts.
+ */
+declare const DEFAULT_LAZER_ENDPOINTS: string[];
+/**
+ * Properties requested in every Lazer update. `pyth_lazer_rule` abstains on an
+ * update missing `confidence` or `feedUpdateTimestamp`, and reads
+ * `marketSession` when present, so trimming this list silently loses the price.
+ *
+ * Exported so a proxy in front of Lazer can request exactly this list rather
+ * than keep a copy that drifts when the SDK needs another property.
+ */
+declare const LAZER_PROPERTIES: readonly ["price", "exponent", "confidence", "feedUpdateTimestamp", "marketSession"];
+/**
  * Access to Pyth Lazer. Lazer is token-gated, and the token is a secret: a
  * browser must not hold it. A dApp should point `endpoint` at its own server
  * route that forwards `POST /v1/latest_price` with the token attached, and pass
@@ -656,4 +671,4 @@ declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
 
-export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, type Double, type Float, type IotaObjectDataWithContent, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type PythLazerAccess, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject };
+export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, DEFAULT_LAZER_ENDPOINTS, type Double, type Float, type IotaObjectDataWithContent, LAZER_PROPERTIES, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type PythLazerAccess, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject };

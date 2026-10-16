@@ -1933,6 +1933,8 @@ var VirtueClient = class {
 export {
   COIN_DECIMALS,
   CONFIG,
+  DEFAULT_LAZER_ENDPOINTS,
+  LAZER_PROPERTIES,
   ObjectContentFields,
   U64FromBytes,
   VirtueClient,
