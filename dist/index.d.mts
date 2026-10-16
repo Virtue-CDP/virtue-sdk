@@ -6,6 +6,8 @@ import { Infer } from 'superstruct';
 
 type COIN = "VUSD" | "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
 type COLLATERAL_COIN = "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
+/** Stablecoins the Virtue PSM swaps 1:1 with VUSD. */
+type PSM_COIN = "USDT0";
 
 type Float = {
     fields: {
@@ -99,6 +101,44 @@ type PoolPositionsResponse = {
     }[];
     nextCursor: string | null;
 };
+type PsmPoolObjectInfo = {
+    coinType: string;
+    decimal: number;
+    pool: SharedObjectRef;
+};
+/**
+ * A PSM pool's live state. Amounts are raw on-chain units as strings: `balance`
+ * in the pool's coin, `vusdSupply` and the module limit in VUSD. Fee rates are
+ * fractions (0.001 = 0.1%).
+ */
+type PsmPoolInfo = {
+    coin: PSM_COIN;
+    coinType: string;
+    decimal: number;
+    /** The pool's coin it holds, so the most a swap out can pay. */
+    balance: string;
+    /** VUSD minted through this pool and not yet burned back. */
+    vusdSupply: string;
+    /** Default fee rates, paid by any swap without a partner `AccountRequest`. */
+    swapInFeeRate: number;
+    swapOutFeeRate: number;
+    /** Fee rates for partners, keyed by their normalized `AccountRequest` address. */
+    partnerFeeRates: Record<string, {
+        swapInFeeRate: number;
+        swapOutFeeRate: number;
+    }>;
+    /**
+     * VUSD the PSM module may still mint (`limit - supply` on the treasury),
+     * shared by every PSM pool. A swap in that would mint past it aborts.
+     */
+    mintableVusd: string;
+    /**
+     * VUSD the PSM module has minted and not burned, across every PSM pool. A
+     * swap out burns against it first, so it caps a swap out too.
+     */
+    moduleVusdSupply: string;
+};
+type PsmPoolInfoList = Partial<Record<PSM_COIN, PsmPoolInfo>>;
 
 declare const COIN_DECIMALS: Record<COIN, number>;
 
@@ -152,6 +192,17 @@ type ConfigType = {
     STABILITY_POOL_TABLE_ID: string;
     STABILITY_POOL_REWARDERS: Rewarder[];
     VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo>;
+    /**
+     * Virtue PSM. Optional: testnet has no deployment, and the PSM methods throw
+     * there rather than build a call to nothing.
+     */
+    PSM_PACKAGE_ID?: string;
+    /**
+     * The PSM module's witness type, keying its supply on the treasury. Must name
+     * the package's original id: a `TypeName` keeps it across upgrades.
+     */
+    PSM_WITNESS_TYPE?: string;
+    PSM_POOLS?: Partial<Record<PSM_COIN, PsmPoolObjectInfo>>;
 };
 declare const CONFIG: Record<"mainnet" | "testnet", ConfigType>;
 
@@ -247,6 +298,11 @@ declare class VirtueClient {
      */
     getStabilityPool(): Promise<StabilityPoolInfo>;
     /**
+     * @description Get every PSM pool's live state, with the VUSD the PSM module
+     * may still mint. Empty where the network has no PSM.
+     */
+    getPsmPools(): Promise<PsmPoolInfoList>;
+    /**
      * @description Get user's balances in stability pool
      */
     getStabilityPoolBalances(account?: string): Promise<StabilityPoolBalances>;
@@ -286,6 +342,13 @@ declare class VirtueClient {
      */
     splitInputCoins(coinSymbol: COIN, ...amounts: (string | TransactionArgument)[]): Promise<TransactionResult>;
     /**
+     * @description split the needed coins of any non-IOTA coin type, merging the
+     * sender's coins of that type first. Everything that can fail (the coin
+     * reads, the balance check) runs before anything is written, since a
+     * `Transaction` cannot be rolled back.
+     */
+    splitCoinsByType(coinType: string, ...amounts: (string | TransactionArgument)[]): Promise<TransactionResult>;
+    /**
      * @description Reset this.transaction
      */
     resetTransaction(): void;
@@ -299,6 +362,37 @@ declare class VirtueClient {
     treasuryObj(): TransactionArgument;
     vaultObj(collateralSymbol: COLLATERAL_COIN): TransactionArgument;
     stabilityPoolObj(): TransactionArgument;
+    /** The PSM package and `coin`'s pool, or a throw where there is no PSM. */
+    private psmPool;
+    /**
+     * `&Option<AccountRequest>` for the PSM's partner fee lookup: `none` pays the
+     * default rates.
+     */
+    private psmPartner;
+    /**
+     * @description PSM swap in: deposit `coin` and mint VUSD 1:1 after decimal
+     * scaling, less the swap-in fee (taken in VUSD)
+     * @param assetCoin: Coin<coin> to deposit
+     * @param accountRequest (optional): a partner's AccountRequest for its fee rate
+     * @returns Coin<VUSD>
+     */
+    psmSwapIn(inputs: {
+        coin: PSM_COIN;
+        assetCoin: TransactionArgument;
+        accountRequest?: TransactionArgument;
+    }): TransactionArgument;
+    /**
+     * @description PSM swap out: burn VUSD and withdraw `coin` 1:1 after decimal
+     * scaling, less the swap-out fee (taken in `coin`)
+     * @param vusdCoin: Coin<VUSD> to burn
+     * @param accountRequest (optional): a partner's AccountRequest for its fee rate
+     * @returns Coin<coin>
+     */
+    psmSwapOut(inputs: {
+        coin: PSM_COIN;
+        vusdCoin: TransactionArgument;
+        accountRequest?: TransactionArgument;
+    }): TransactionArgument;
     /**
      * @description Create a AccountRequest
      * @param accountObj (optional): Account object or EOA if undefined
@@ -667,6 +761,24 @@ declare class VirtueClient {
         accountObj?: string | TransactionArgument;
     }): Transaction;
     /**
+     * @description build and return Transaction of a PSM swap, sending the
+     * output to the sender. No oracle is involved: the PSM swaps at a fixed 1:1.
+     * @param coin: the PSM stablecoin, e.g. "USDT0"
+     * @param direction: "in" pays `coin` for VUSD, "out" pays VUSD for `coin`
+     * @param amount: raw units of what is paid
+     * @param accountObj (optional): pay a partner's fee rates. Quote it with the
+     * account's address as `quotePsmSwap`'s `partner`, or the quote will not
+     * match.
+     * @returns Transaction
+     */
+    buildPsmSwapTransaction(inputs: {
+        coin: PSM_COIN;
+        direction: "in" | "out";
+        amount: string;
+        accountObj?: string | TransactionArgument;
+        keepTransaction?: boolean;
+    }): Promise<Transaction>;
+    /**
      * @description instruction for emitting point request
      */
     emitPoint(collateralSymbol: COLLATERAL_COIN, response: TransactionArgument): void;
@@ -692,4 +804,38 @@ declare const getObjectGenerics: (resp: IotaObjectResponse) => string[];
 
 declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultResponse) => VaultInfo;
 
-export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, DEFAULT_LAZER_ENDPOINTS, type Double, type Float, type IotaObjectDataWithContent, LAZER_PROPERTIES, ObjectContentFields, type PoolPositionsResponse, type PositionInfo, type PythLazerAccess, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject };
+type PsmSwapDirection = "in" | "out";
+/**
+ * Why the chain would refuse a swap: a swap in that mints past the PSM's VUSD
+ * supply limit, or a swap out larger than the pool's coin balance, the VUSD
+ * minted through this pool, or the VUSD the PSM module has outstanding across
+ * all its pools (the treasury's burn or the pool's `EPoolNotEnough` aborts).
+ */
+type PsmQuoteError = "SUPPLY_LIMIT" | "POOL_NOT_ENOUGH";
+type PsmQuote = {
+    direction: PsmSwapDirection;
+    /** Raw units of what is paid: the pool's coin for "in", VUSD for "out". */
+    amountIn: bigint;
+    /** Raw units of what is received, after the fee. */
+    amountOut: bigint;
+    /** Raw units of the fee, in the received coin. */
+    fee: bigint;
+    error?: PsmQuoteError;
+};
+/**
+ * The exact result of `pool::swap_in` / `pool::swap_out` for `amountIn` raw
+ * units, with the chain's rounding: the converted amount is floored and the
+ * fee, taken from the output, is rounded up.
+ * @param partner (optional) the address of the partner `AccountRequest` the
+ * swap carries (see `buildPsmSwapTransaction`'s `accountObj`). Without it the
+ * quote uses the default fee rates, as the chain does for a swap with none.
+ */
+declare const quotePsmSwap: (pool: PsmPoolInfo, direction: PsmSwapDirection, amountIn: bigint, partner?: string) => PsmQuote;
+/**
+ * The smallest input whose swap pays out at least `amountOut` raw units, for
+ * a form where the user types what they want to receive. Rounding makes the
+ * output a step function of the input, so this searches rather than inverts.
+ */
+declare const quotePsmSwapExactOut: (pool: PsmPoolInfo, direction: PsmSwapDirection, amountOut: bigint, partner?: string) => PsmQuote;
+
+export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, DEFAULT_LAZER_ENDPOINTS, type Double, type Float, type IotaObjectDataWithContent, LAZER_PROPERTIES, ObjectContentFields, type PSM_COIN, type PoolPositionsResponse, type PositionInfo, type PsmPoolInfo, type PsmPoolInfoList, type PsmPoolObjectInfo, type PsmQuote, type PsmQuoteError, type PsmSwapDirection, type PythLazerAccess, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject, quotePsmSwap, quotePsmSwapExactOut };
