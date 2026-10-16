@@ -75,11 +75,12 @@ describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
     return bySymbol;
   };
 
-  it("prices IOTA and its derivatives through the Lazer rule", async () => {
+  it("prices IOTA, iBTC and the IOTA derivatives through the Lazer rule", async () => {
     const client = new VirtueClient({ pythLazer });
     client.resetTransaction();
     const sources = await aggregatedSources(client);
     expect(sources.IOTA).toEqual(["PythLazerRule"]);
+    expect(sources.IBTC).toEqual(["PythLazerRule"]);
     // stIOTA and vIOTA are computed from the IOTA price by their own rules.
     expect(sources.CERT).toBeDefined();
   }, 90_000);
@@ -90,8 +91,11 @@ describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
     await client.aggregatePrices();
     const calls = moveCallsOf(client.getTransaction());
     // Lazer stores nothing on chain: `feed` reads the `Update` the verify call
-    // returned, so the verify has to come first.
-    expect(calls).toContain("pyth_lazer::parse_and_verify_le_ecdsa_update");
+    // returned, so the verify has to come first. One update serves every feed.
+    expect(
+      calls.filter((c) => c === "pyth_lazer::parse_and_verify_le_ecdsa_update"),
+    ).toHaveLength(1);
+    expect(calls.filter((c) => c === "pyth_lazer_rule::feed")).toHaveLength(2);
     expect(
       calls.indexOf("pyth_lazer::parse_and_verify_le_ecdsa_update"),
     ).toBeLessThan(calls.indexOf("pyth_lazer_rule::feed"));

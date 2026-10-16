@@ -4,8 +4,8 @@ import { Keypair } from '@iota/iota-sdk/cryptography';
 import * as superstruct from 'superstruct';
 import { Infer } from 'superstruct';
 
-type COIN = "VUSD" | "IOTA" | "stIOTA" | "vIOTA";
-type COLLATERAL_COIN = "IOTA" | "stIOTA" | "vIOTA";
+type COIN = "VUSD" | "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
+type COLLATERAL_COIN = "IOTA" | "stIOTA" | "iBTC" | "vIOTA";
 
 type Float = {
     fields: {

@@ -44,6 +44,9 @@ describe("Interacting with VirtueClient", () => {
     assert(prices.IOTA !== undefined, "IOTA has no price");
     assert(prices.stIOTA !== undefined, "stIOTA has no price");
     assert(prices.vIOTA !== undefined, "vIOTA has no price");
+    assert(prices.iBTC !== undefined, "iBTC has no price");
+    // BTC is worth vastly more than IOTA; a misrouted feed would not be.
+    expect(prices.iBTC).toBeGreaterThan(1_000);
     expect(prices.stIOTA).toBeGreaterThan(prices.IOTA);
     expect(prices.vIOTA).toBeGreaterThan(prices.IOTA);
     client.resetTransaction();

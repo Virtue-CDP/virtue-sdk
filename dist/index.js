@@ -12,6 +12,7 @@ var COIN_DECIMALS = {
   VUSD: 6,
   IOTA: 9,
   stIOTA: 9,
+  iBTC: 10,
   vIOTA: 9
 };
 
@@ -22,6 +23,7 @@ var CONFIG = {
       VUSD: "0xd3b63e603a78786facf65ff22e79701f3e824881a12fa3268d62a75530fe904f::vusd::VUSD",
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA: "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
+      iBTC: "0x387c459c5c947aac7404e53ba69541c5d64f3cf96f3bc515e7f8a067fb725b54::ibtc::IBTC",
       vIOTA: "0xe4abf8b6183c106282addbfb8483a043e1a60f1fd3dd91fb727fa284306a27fd::cert::CERT"
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID: "0x7400af41a9b9d7e4502bc77991dbd1171f90855564fd28afa172a5057beb083b",
@@ -98,7 +100,8 @@ var CONFIG = {
       mutable: false
     },
     PYTH_LAZER_FEED_IDS: {
-      IOTA: 70
+      IOTA: 70,
+      iBTC: 1
     },
     PYTH_LAZER_CHANNEL: "fixed_rate@1000ms",
     POINT_GLOBAL_CONFIG_OBJ: {
@@ -153,6 +156,18 @@ var CONFIG = {
           }
         ]
       },
+      iBTC: {
+        priceAggregater: {
+          objectId: "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
+          initialSharedVersion: 172291113,
+          mutable: false
+        },
+        vault: {
+          objectId: "0xcc094d9e3b491b0c943bb18daf07a49bd951f34688f9610d90982de06fc0c5c9",
+          initialSharedVersion: 172291112,
+          mutable: true
+        }
+      },
       vIOTA: {
         priceAggregater: {
           objectId: "0xe5fbc659022066c53f8143e42c604b561719990a1eca76e06bb284f8791d8cc9",
@@ -172,6 +187,7 @@ var CONFIG = {
       VUSD: "0x3fbd238eea1f4ce7d797148954518fce853f24a8be01b47388bfa2262602fefa::vusd::VUSD",
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA: "0x14f9e69c0076955d5a056260c9667edab184650dba9919f168a37030dd956dc6::cert::CERT",
+      iBTC: "",
       vIOTA: ""
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID: "0x5e1fb08bd2360286cd13dd174f6d17aa8871b08906aa8001079199ad62ad81b1",
@@ -268,6 +284,18 @@ var CONFIG = {
           mutable: true
         },
         rewarders: []
+      },
+      iBTC: {
+        priceAggregater: {
+          objectId: "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
+          initialSharedVersion: 172291113,
+          mutable: false
+        },
+        vault: {
+          objectId: "0xcc094d9e3b491b0c943bb18daf07a49bd951f34688f9610d90982de06fc0c5c9",
+          initialSharedVersion: 172291112,
+          mutable: true
+        }
       },
       vIOTA: {
         priceAggregater: {
@@ -423,7 +451,7 @@ var LAZER_PROPERTIES = [
   "feedUpdateTimestamp",
   "marketSession"
 ];
-var BASIC_PRICE_SYMBOLS = ["IOTA"];
+var BASIC_PRICE_SYMBOLS = ["IOTA", "iBTC"];
 var getCoinSymbol2 = (coinType, coinTypes) => {
   const coin = Object.keys(coinTypes).find(
     (key) => coinTypes[key] === coinType

@@ -73,6 +73,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA:
         "0x346778989a9f57480ec3fee15f2cd68409c73a62112d40a3efd13987997be68c::cert::CERT",
+      iBTC: "0x387c459c5c947aac7404e53ba69541c5d64f3cf96f3bc515e7f8a067fb725b54::ibtc::IBTC",
       vIOTA:
         "0xe4abf8b6183c106282addbfb8483a043e1a60f1fd3dd91fb727fa284306a27fd::cert::CERT",
     },
@@ -184,6 +185,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
     },
     PYTH_LAZER_FEED_IDS: {
       IOTA: 70,
+      iBTC: 1,
     },
     PYTH_LAZER_CHANNEL: "fixed_rate@1000ms",
 
@@ -249,6 +251,20 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           },
         ],
       },
+      iBTC: {
+        priceAggregater: {
+          objectId:
+            "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
+          initialSharedVersion: 172291113,
+          mutable: false,
+        },
+        vault: {
+          objectId:
+            "0xcc094d9e3b491b0c943bb18daf07a49bd951f34688f9610d90982de06fc0c5c9",
+          initialSharedVersion: 172291112,
+          mutable: true,
+        },
+      },
       vIOTA: {
         priceAggregater: {
           objectId:
@@ -271,6 +287,7 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
       IOTA: "0x0000000000000000000000000000000000000000000000000000000000000002::iota::IOTA",
       stIOTA:
         "0x14f9e69c0076955d5a056260c9667edab184650dba9919f168a37030dd956dc6::cert::CERT",
+      iBTC: "",
       vIOTA: "",
     },
     ORIGINAL_FRAMEWORK_PACKAGE_ID:
@@ -391,6 +408,20 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           mutable: true,
         },
         rewarders: [],
+      },
+      iBTC: {
+        priceAggregater: {
+          objectId:
+            "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
+          initialSharedVersion: 172291113,
+          mutable: false,
+        },
+        vault: {
+          objectId:
+            "0xcc094d9e3b491b0c943bb18daf07a49bd951f34688f9610d90982de06fc0c5c9",
+          initialSharedVersion: 172291112,
+          mutable: true,
+        },
       },
       vIOTA: {
         priceAggregater: {

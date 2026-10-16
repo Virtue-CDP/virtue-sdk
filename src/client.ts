@@ -54,7 +54,7 @@ const LAZER_PROPERTIES = [
 ] as const;
 
 /** The collaterals priced directly by an oracle; the rest are derived from these. */
-const BASIC_PRICE_SYMBOLS: COLLATERAL_COIN[] = ["IOTA"];
+const BASIC_PRICE_SYMBOLS: COLLATERAL_COIN[] = ["IOTA", "iBTC"];
 
 /**
  * Everything the oracle rules need from the network, resolved before a single
