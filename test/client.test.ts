@@ -135,15 +135,25 @@ describe("Interacting with VirtueClient", () => {
       parentId: client.config.STABILITY_POOL_TABLE_ID,
       limit: 10,
     });
-    const depositor = data.find((f) => f.name.type === "address");
-    assert(depositor, "no depositor in the stability pool table");
-    const balances = await client.getStabilityPoolBalances(
-      depositor.name.value as string,
-    );
-    const total =
-      Number(balances.vusdBalance) +
-      Object.values(balances.collBalances).reduce((a, b) => a + (b ?? 0), 0);
-    expect(total).toBeGreaterThan(0);
+    // Entries stay after a full withdrawal and read as zeros, which is correct,
+    // so look for one that still holds something rather than taking the first.
+    const depositors = data.filter((f) => f.name.type === "address");
+    assert(depositors.length > 0, "no depositor in the stability pool table");
+    let found = false;
+    for (const depositor of depositors) {
+      const balances = await client.getStabilityPoolBalances(
+        depositor.name.value as string,
+      );
+      const total =
+        Number(balances.vusdBalance) +
+        Object.values(balances.collBalances).reduce((a, b) => a + (b ?? 0), 0);
+      if (total > 0) {
+        found = true;
+        break;
+      }
+    }
+    // A silent-zero regression reads every one of them as zero.
+    expect(found).toBe(true);
   }, 30_000);
 
   it("reads a non-depositor as zero balances", async () => {

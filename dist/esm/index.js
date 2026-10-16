@@ -2027,12 +2027,12 @@ var VirtueClient = class _VirtueClient {
       );
     }
     const debtNow = BigInt(position.debtAmount);
-    if (debtNow > 0n && BigInt(totalBalance) < debtNow) {
+    const headroom = debtNow + debtNow / 1000n + 1000n;
+    if (debtNow > 0n && BigInt(totalBalance) < headroom) {
       throw new Error(
-        `Not enough VUSD to close the ${collateralSymbol} position: it owes ${debtNow} and the wallet holds ${totalBalance}.`
+        `Not enough VUSD to close the ${collateralSymbol} position: it owes ${debtNow} plus accruing interest, and needs up to ${headroom}; the wallet holds ${totalBalance}.`
       );
     }
-    const headroom = debtNow + debtNow / 1000n + 1000n;
     const repaymentBudget = headroom < BigInt(totalBalance) ? headroom : BigInt(totalBalance);
     this.transaction.setSender(this.sender);
     const collType = this.config.COIN_TYPES[collateralSymbol];

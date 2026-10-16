@@ -2028,14 +2028,16 @@ export class VirtueClient {
       );
     }
     const debtNow = BigInt(position.debtAmount);
-    // `coinWithBalance` resolves a zero budget to `coin::zero` (since 1.10), so
-    // a wallet short of the debt would only abort on chain, after signing.
-    if (debtNow > 0n && BigInt(totalBalance) < debtNow) {
+    // The debt grows with interest before execution, and `coinWithBalance`
+    // resolves a zero budget to `coin::zero` (since 1.10), so a wallet short of
+    // it would only abort on chain, after signing. Require the same headroom
+    // the budget aims for: conservative by at most 0.1% + 0.001 VUSD.
+    const headroom = debtNow + debtNow / 1000n + 1000n;
+    if (debtNow > 0n && BigInt(totalBalance) < headroom) {
       throw new Error(
-        `Not enough VUSD to close the ${collateralSymbol} position: it owes ${debtNow} and the wallet holds ${totalBalance}.`,
+        `Not enough VUSD to close the ${collateralSymbol} position: it owes ${debtNow} plus accruing interest, and needs up to ${headroom}; the wallet holds ${totalBalance}.`,
       );
     }
-    const headroom = debtNow + debtNow / 1000n + 1000n;
     const repaymentBudget =
       headroom < BigInt(totalBalance) ? headroom : BigInt(totalBalance);
     this.transaction.setSender(this.sender);
