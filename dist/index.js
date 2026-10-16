@@ -800,12 +800,18 @@ var VirtueClient = class _VirtueClient {
       throw new Error("Invalid account address");
     }
     const res = await this.iotaClient.getDynamicFieldObject({
-      parentId: this.config.STABILITY_POOL_TABLE_ID,
+      parentObjectId: this.config.STABILITY_POOL_TABLE_ID,
       name: {
         type: "address",
         value: accountAddr
-      }
+      },
+      options: { showContent: true }
     });
+    if (res.error && res.error.code !== "dynamicFieldNotFound") {
+      throw new Error(
+        `Could not read the stability pool position: ${JSON.stringify(res.error)}`
+      );
+    }
     const collBalances = {};
     Object.keys(this.config.VAULT_MAP).map((collSymbol) => {
       collBalances[collSymbol] = 0;
@@ -2022,6 +2028,11 @@ var VirtueClient = class _VirtueClient {
     }
     const debtNow = BigInt(position.debtAmount);
     const headroom = debtNow + debtNow / 1000n + 1000n;
+    if (debtNow > 0n && BigInt(totalBalance) < headroom) {
+      throw new Error(
+        `Not enough VUSD to close the ${collateralSymbol} position: it owes ${debtNow} plus accruing interest, and needs up to ${headroom}; the wallet holds ${totalBalance}.`
+      );
+    }
     const repaymentBudget = headroom < BigInt(totalBalance) ? headroom : BigInt(totalBalance);
     this.transaction.setSender(this.sender);
     const collType = this.config.COIN_TYPES[collateralSymbol];

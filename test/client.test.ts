@@ -126,6 +126,43 @@ describe("Interacting with VirtueClient", () => {
     // console.log(dryrunRes.objectChanges);
   }, 20_000);
 
+  it("reads a real stability-pool depositor's balances, not zeros", async () => {
+    // Since @iota/iota-sdk 1.7 the dynamic-field read returns no content unless
+    // asked; a regression would read every balance as 0 without an error. Pick
+    // a live depositor from the table so this does not depend on one account.
+    const iota = client.getIotaClient();
+    const { data } = await iota.getDynamicFields({
+      parentId: client.config.STABILITY_POOL_TABLE_ID,
+      limit: 10,
+    });
+    // Entries stay after a full withdrawal and read as zeros, which is correct,
+    // so look for one that still holds something rather than taking the first.
+    const depositors = data.filter((f) => f.name.type === "address");
+    assert(depositors.length > 0, "no depositor in the stability pool table");
+    let found = false;
+    for (const depositor of depositors) {
+      const balances = await client.getStabilityPoolBalances(
+        depositor.name.value as string,
+      );
+      const total =
+        Number(balances.vusdBalance) +
+        Object.values(balances.collBalances).reduce((a, b) => a + (b ?? 0), 0);
+      if (total > 0) {
+        found = true;
+        break;
+      }
+    }
+    // A silent-zero regression reads every one of them as zero.
+    expect(found).toBe(true);
+  }, 30_000);
+
+  it("reads a non-depositor as zero balances", async () => {
+    const balances = await client.getStabilityPoolBalances(
+      "0x000000000000000000000000000000000000000000000000000000000000dead",
+    );
+    expect(Number(balances.vusdBalance)).toBe(0);
+  }, 30_000);
+
   it("test getStabilityPool() function", async () => {
     const stabilityPool = await client.getStabilityPool();
     // console.log(stabilityPool);
