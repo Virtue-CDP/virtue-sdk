@@ -160,7 +160,7 @@ declare const CONFIG: Record<"mainnet" | "testnet", ConfigType>;
  * Each serves the same signed data. Override with `pythLazer.endpoint` to go
  * through a proxy; exported so that proxy can use the same hosts.
  */
-declare const DEFAULT_LAZER_ENDPOINTS: string[];
+declare const DEFAULT_LAZER_ENDPOINTS: readonly string[];
 /**
  * Properties requested in every Lazer update. `pyth_lazer_rule` abstains on an
  * update missing `confidence` or `feedUpdateTimestamp`, and reads
@@ -183,7 +183,7 @@ type PythLazerAccess = {
      * Base URL(s) serving `POST /v1/latest_price`, tried in order until one
      * returns an update. Defaults to Pyth's own hosts.
      */
-    endpoint?: string | string[];
+    endpoint?: string | readonly string[];
 };
 declare class VirtueClient {
     /**

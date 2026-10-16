@@ -441,22 +441,24 @@ var parseVaultObject = (coinSymbol, fields) => {
 import { bcs } from "@iota/iota-sdk/bcs";
 import {
   fromHEX,
+  isValidIotaAddress,
+  isValidIotaObjectId,
   normalizeIotaAddress as normalizeIotaAddress2,
   normalizeStructTag
 } from "@iota/iota-sdk/utils";
 var LAZER_FETCH_TIMEOUT_MS = 5e3;
-var DEFAULT_LAZER_ENDPOINTS = [
+var DEFAULT_LAZER_ENDPOINTS = Object.freeze([
   "https://pyth-lazer-0.dourolabs.app",
   "https://pyth-lazer-1.dourolabs.app",
   "https://pyth-lazer-2.dourolabs.app"
-];
-var LAZER_PROPERTIES = [
+]);
+var LAZER_PROPERTIES = Object.freeze([
   "price",
   "exponent",
   "confidence",
   "feedUpdateTimestamp",
   "marketSession"
-];
+]);
 var BASIC_PRICE_SYMBOLS = ["IOTA", "iBTC"];
 var DERIVED_FROM = {
   stIOTA: "IOTA",
@@ -473,8 +475,8 @@ var getCoinSymbol2 = (coinType, coinTypes) => {
   return void 0;
 };
 var DUMMY_ADDRESS = normalizeIotaAddress2("0x0");
-var noPriceError = (symbol) => new Error(
-  `No oracle rule could price ${symbol}: borrowing, and withdrawing while in debt, require a price.`
+var noPriceError = (symbol, withoutPriceRejection) => new Error(
+  `No oracle rule could price ${symbol}: borrowing, and withdrawing while in debt, require a price.` + (withoutPriceRejection ? ` A withdrawal without a price was rejected on chain: ${withoutPriceRejection}` : "")
 );
 var TYPE_NAME_STRUCT = bcs.struct("TypeName", {
   name: bcs.String
@@ -1599,9 +1601,18 @@ var VirtueClient = class _VirtueClient {
    */
   async canWithdrawWithoutPrice(inputs) {
     const plainWithdrawal = Number(inputs.withdrawAmount) > 0 && Number(inputs.borrowAmount) === 0 && Number(inputs.depositAmount) === 0 && Number(inputs.repaymentAmount) === 0;
-    if (!plainWithdrawal) return false;
-    if (this.sender === DUMMY_ADDRESS) return false;
-    if (this.transaction.getData().commands.length > 0) return false;
+    if (!plainWithdrawal) return { ok: false };
+    if (this.sender === DUMMY_ADDRESS) return { ok: false };
+    if (this.transaction.getData().commands.length > 0) return { ok: false };
+    const { recipient, accountObjId } = inputs;
+    if (recipient !== void 0 && !isValidIotaAddress(normalizeIotaAddress2(recipient))) {
+      throw new Error(
+        `Invalid recipient for a withdrawal: ${recipient}. Only borrowed VUSD can go to the stability pool.`
+      );
+    }
+    if (accountObjId !== void 0 && !isValidIotaObjectId(normalizeIotaAddress2(accountObjId))) {
+      throw new Error(`Invalid accountObjId: ${accountObjId}`);
+    }
     const scratch = new _VirtueClient({
       network: this.network,
       rpcUrl: this.rpcEndpoint,
@@ -1625,7 +1636,7 @@ var VirtueClient = class _VirtueClient {
         { cause: error }
       );
     }
-    return inspect.effects.status.status === "success";
+    return inspect.effects.status.status === "success" ? { ok: true } : { ok: false, rejection: inspect.effects.status.error ?? "unknown abort" };
   }
   /**
    * @description build and return Transaction of manage position
@@ -1661,14 +1672,19 @@ var VirtueClient = class _VirtueClient {
       ]);
       if (await this.canPriceCollateral(collateralSymbol, prepared)) {
         price = prepared;
-      } else if (await this.canWithdrawWithoutPrice(inputs)) {
-        price = "none";
       } else {
-        throw noPriceError(collateralSymbol);
+        const withoutPrice = await this.canWithdrawWithoutPrice(inputs);
+        if (!withoutPrice.ok) {
+          throw noPriceError(collateralSymbol, withoutPrice.rejection);
+        }
+        if (this.transaction.getData().commands.length > 0) {
+          throw noPriceError(collateralSymbol);
+        }
+        price = "none";
       }
     }
     this.transaction.setSender(this.sender);
-    return await this.buildManagePosition(inputs, price);
+    return await this.buildManagePosition(inputs, price ?? null);
   }
   /**
    * @description The body of `buildManagePositionTransaction`, split out so the
@@ -1691,7 +1707,7 @@ var VirtueClient = class _VirtueClient {
     );
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      const priceResult = price === void 0 || price === "none" ? void 0 : this.aggregatePricesWith(price, this.transaction, [
+      const priceResult = price === null || price === "none" ? void 0 : this.aggregatePricesWith(price, this.transaction, [
         collateralSymbol
       ])[collateralSymbol];
       if (!priceResult && price !== "none") {

@@ -325,7 +325,12 @@ describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
         if (!isProbe) return realInspect(args);
         if (outcome === "throw") throw new Error("ECONNRESET");
         return {
-          effects: { status: { status: outcome } },
+          effects: {
+            status:
+              outcome === "failure"
+                ? { status: "failure", error: "MoveAbort(err_withdraw_too_much)" }
+                : { status: "success" },
+          },
           events: [],
         } as any;
       });
@@ -350,21 +355,79 @@ describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
     breakLazer("reject");
     const client = new VirtueClient({ sender: WALLET, pythLazer });
     stubProbe(client, "failure");
+    // The chain's own reason is carried into the error, since it may have
+    // nothing to do with the oracle.
     await expect(
       client.buildManagePositionTransaction(withdrawal),
-    ).rejects.toThrow(/No oracle rule could price iBTC/);
+    ).rejects.toThrow(
+      /No oracle rule could price iBTC.*rejected on chain: MoveAbort\(err_withdraw_too_much\)/,
+    );
   }, 90_000);
 
-  it("refuses for real when the chain rejects the priceless withdrawal", async () => {
-    // Unstubbed: the real priceless withdrawal is dev-inspected and aborts on
-    // chain, so the build is refused. While the protocol is paused it aborts at
-    // `vusd::err_invalid_module_version`; once unpaused, this wallet having no
-    // iBTC position aborts it instead.
+  it("follows the real priceless inspection's verdict", async () => {
+    // Unstubbed, and independent of chain state: whatever the real inspection
+    // says, the build must agree with it. (While the protocol is paused it
+    // aborts at `vusd::err_invalid_module_version`.)
     breakLazer("reject");
     const client = new VirtueClient({ sender: WALLET, pythLazer });
+    const iota = client.getIotaClient();
+    const realInspect = iota.devInspectTransactionBlock.bind(iota);
+    let verdict: any;
+    vi.spyOn(iota, "devInspectTransactionBlock").mockImplementation(
+      async (args: any) => {
+        const res = await realInspect(args);
+        const isProbe = (args.transactionBlock?.getData?.().commands ?? []).some(
+          (c: any) => c.MoveCall?.function === "update_position",
+        );
+        if (isProbe) verdict = res.effects.status;
+        return res;
+      },
+    );
+    const outcome = await client
+      .buildManagePositionTransaction(withdrawal)
+      .then(() => "built", (e: Error) => e.message);
+    expect(verdict).toBeDefined();
+    if (verdict.status === "success") {
+      expect(outcome).toBe("built");
+    } else {
+      expect(outcome).toContain("rejected on chain");
+    }
+  }, 90_000);
+
+  it("refuses when the transaction is written to while the probe is in flight", async () => {
+    breakLazer("reject");
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
+    const iota = client.getIotaClient();
+    vi.spyOn(iota, "devInspectTransactionBlock").mockImplementation(
+      async () => {
+        // Another build lands on the client's transaction mid-probe.
+        const tx = client.getTransaction();
+        tx.moveCall({
+          target: "0x2::clock::timestamp_ms",
+          arguments: [tx.object.clock()],
+        });
+        return { effects: { status: { status: "success" } }, events: [] } as any;
+      },
+    );
+    client.resetTransaction();
     await expect(
-      client.buildManagePositionTransaction(withdrawal),
+      client.buildManagePositionTransaction({ ...withdrawal, keepTransaction: true }),
     ).rejects.toThrow(/No oracle rule could price iBTC/);
+    const calls = moveCallsOf(client.getTransaction());
+    expect(calls).not.toContain("vault::update_position");
+  }, 90_000);
+
+  it("reports a bad recipient as an input error, not a transport failure", async () => {
+    breakLazer("reject");
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
+    const probe = stubProbe(client, "success");
+    await expect(
+      client.buildManagePositionTransaction({
+        ...withdrawal,
+        recipient: "StabilityPool",
+      }),
+    ).rejects.toThrow(/Invalid recipient for a withdrawal/);
+    expect(probe).not.toHaveBeenCalled();
   }, 90_000);
 
   it("reports an unreachable RPC during the probe as a transport failure", async () => {
