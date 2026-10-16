@@ -1,5 +1,6 @@
 // src/client.ts
 import {
+  coinWithBalance,
   Transaction
 } from "@iota/iota-sdk/transactions";
 import {
@@ -1043,10 +1044,12 @@ var VirtueClient = class _VirtueClient {
     }
   }
   /**
-   * @description split the needed coins of any non-IOTA coin type, merging the
-   * sender's coins of that type first. Everything that can fail (the coin
-   * reads, the balance check) runs before anything is written, since a
-   * `Transaction` cannot be rolled back.
+   * @description split the needed coins of any non-IOTA coin type. Coin
+   * selection is the SDK's `coinWithBalance` intent, resolved when the
+   * transaction is built: a shortfall surfaces then, as "Not enough coins of
+   * type ...", and the coins come from the transaction's sender. Until then
+   * the transaction carries an unresolved intent, so building it needs an RPC
+   * client.
    */
   async splitCoinsByType(coinType, ...amounts) {
     const total = amounts.every((a) => typeof a === "string") ? amounts.reduce((sum, a) => sum + BigInt(a), 0n) : void 0;
@@ -1067,45 +1070,32 @@ var VirtueClient = class _VirtueClient {
       });
       return out2;
     }
-    const userCoins = [];
-    let held = 0n;
-    let cursor = void 0;
-    do {
-      const page = await this.iotaClient.getCoins({
-        owner: this.sender,
-        coinType,
-        cursor
+    const tx = this.transaction;
+    const pureAmounts = amounts.map(
+      (amount) => typeof amount === "string" ? tx.pure.u64(amount) : amount
+    );
+    if (total !== void 0) {
+      const coin2 = tx.add(coinWithBalance({ type: coinType, balance: total }));
+      const out2 = tx.splitCoins(coin2, pureAmounts);
+      tx.moveCall({
+        target: "0x2::coin::destroy_zero",
+        typeArguments: [coinType],
+        arguments: [coin2]
       });
-      userCoins.push(...page.data);
-      held += page.data.reduce((sum, coin) => sum + BigInt(coin.balance), 0n);
-      cursor = page.hasNextPage ? page.nextCursor : null;
-    } while (cursor && (total === void 0 || held < total));
-    if (userCoins.length === 0 || total !== void 0 && held < total) {
-      throw new Error("Not enough balance");
+      return out2;
     }
-    const [mainCoin, ...otherCoins] = userCoins.map(
-      (coin) => this.transaction.objectRef({
-        objectId: coin.coinObjectId,
-        version: coin.version,
-        digest: coin.digest
-      })
+    const { totalBalance } = await this.iotaClient.getBalance({
+      owner: tx.getData().sender ?? this.sender,
+      coinType
+    });
+    if (BigInt(totalBalance) === 0n) {
+      throw new Error(`Not enough coins of type ${coinType}`);
+    }
+    const coin = tx.add(
+      coinWithBalance({ type: coinType, balance: BigInt(totalBalance) })
     );
-    if (!mainCoin) {
-      throw new Error("Not enough balance");
-    }
-    const ifMerge = otherCoins.length > 0;
-    if (ifMerge) {
-      this.transaction.mergeCoins(mainCoin, otherCoins);
-    }
-    const out = this.transaction.splitCoins(
-      mainCoin,
-      amounts.map(
-        (amount) => typeof amount === "string" ? this.transaction.pure.u64(amount) : amount
-      )
-    );
-    if (ifMerge) {
-      this.transaction.transferObjects([mainCoin], this.sender);
-    }
+    const out = tx.splitCoins(coin, pureAmounts);
+    tx.transferObjects([coin], this.sender);
     return out;
   }
   /* ----- Transaction Methods ----- */
@@ -2019,6 +2009,20 @@ var VirtueClient = class _VirtueClient {
     const { collateralSymbol, accountObjId, recipient, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
+    const vusdType = this.config.COIN_TYPES.VUSD;
+    const [positions, { totalBalance }] = await Promise.all([
+      this.getDebtorPositions(this.sender),
+      this.iotaClient.getBalance({ owner: this.sender, coinType: vusdType })
+    ]);
+    const position = positions.find((p) => p.collateral === collateralSymbol);
+    if (!position) {
+      throw new Error(
+        `Could not read the ${collateralSymbol} position to size its repayment.`
+      );
+    }
+    const debtNow = BigInt(position.debtAmount);
+    const headroom = debtNow + debtNow / 1000n + 1000n;
+    const repaymentBudget = headroom < BigInt(totalBalance) ? headroom : BigInt(totalBalance);
     this.transaction.setSender(this.sender);
     const collType = this.config.COIN_TYPES[collateralSymbol];
     const [collAmount, debtAmount] = this.transaction.moveCall({
@@ -2030,7 +2034,13 @@ var VirtueClient = class _VirtueClient {
         this.transaction.object.clock()
       ]
     });
-    const repaymentCoin = await this.splitInputCoins("VUSD", debtAmount);
+    const repaymentFunds = this.transaction.add(
+      coinWithBalance({ type: vusdType, balance: repaymentBudget })
+    );
+    const [repaymentCoin] = this.transaction.splitCoins(repaymentFunds, [
+      debtAmount
+    ]);
+    this.transaction.transferObjects([repaymentFunds], this.sender);
     let updateRequest = this.debtorRequest({
       collateralSymbol,
       depositCoin: this.zeroCoin(collateralSymbol),

@@ -1,4 +1,5 @@
 import {
+  coinWithBalance,
   Transaction,
   TransactionArgument,
   TransactionResult,
@@ -769,10 +770,12 @@ export class VirtueClient {
   }
 
   /**
-   * @description split the needed coins of any non-IOTA coin type, merging the
-   * sender's coins of that type first. Everything that can fail (the coin
-   * reads, the balance check) runs before anything is written, since a
-   * `Transaction` cannot be rolled back.
+   * @description split the needed coins of any non-IOTA coin type. Coin
+   * selection is the SDK's `coinWithBalance` intent, resolved when the
+   * transaction is built: a shortfall surfaces then, as "Not enough coins of
+   * type ...", and the coins come from the transaction's sender. Until then
+   * the transaction carries an unresolved intent, so building it needs an RPC
+   * client.
    */
   async splitCoinsByType(
     coinType: string,
@@ -801,53 +804,48 @@ export class VirtueClient {
       return out;
     }
 
-    // `getCoins` is paginated: read until the coins cover the total, or all of
-    // them when the total is not known.
-    const userCoins: Awaited<ReturnType<IotaClient["getCoins"]>>["data"] = [];
-    let held = 0n;
-    let cursor: string | null | undefined = undefined;
-    do {
-      const page = await this.iotaClient.getCoins({
-        owner: this.sender,
-        coinType,
-        cursor,
+    // The sender's coins are picked, merged and split by the SDK's
+    // `coinWithBalance` intent when the transaction is built, so a shortfall
+    // surfaces then ("Not enough coins of type ..."), from the transaction's
+    // sender.
+    const tx = this.transaction;
+    const pureAmounts = amounts.map((amount) =>
+      typeof amount === "string" ? tx.pure.u64(amount) : amount,
+    );
+    if (total !== undefined) {
+      // A coin of exactly `total`, split into the amounts; what is left is a
+      // zero coin, which has no `drop` and must be destroyed explicitly.
+      const coin = tx.add(coinWithBalance({ type: coinType, balance: total }));
+      const out = tx.splitCoins(coin, pureAmounts);
+      tx.moveCall({
+        target: "0x2::coin::destroy_zero",
+        typeArguments: [coinType],
+        arguments: [coin],
       });
-      userCoins.push(...page.data);
-      held += page.data.reduce((sum, coin) => sum + BigInt(coin.balance), 0n);
-      cursor = page.hasNextPage ? page.nextCursor : null;
-    } while (cursor && (total === undefined || held < total));
-    if (userCoins.length === 0 || (total !== undefined && held < total)) {
-      throw new Error("Not enough balance");
+      return out;
     }
 
-    const [mainCoin, ...otherCoins] = userCoins.map((coin) =>
-      this.transaction.objectRef({
-        objectId: coin.coinObjectId,
-        version: coin.version,
-        digest: coin.digest,
-      }),
+    // An amount only known on chain cannot be sized up front: take the
+    // sender's whole balance of the type, split the amounts from it, and
+    // return the rest. Because it claims the whole balance it cannot share a
+    // transaction with another `coinWithBalance` of the same coin (their
+    // totals are summed). Close position sizes its VUSD from the debt instead.
+    // The intent picks coins from the transaction's sender, so read that
+    // account's balance. It is the balance as of now: if it drops before the
+    // transaction is built, or some of those coins are inputs elsewhere in it,
+    // the build fails with "Not enough coins of type ...".
+    const { totalBalance } = await this.iotaClient.getBalance({
+      owner: tx.getData().sender ?? this.sender,
+      coinType,
+    });
+    if (BigInt(totalBalance) === 0n) {
+      throw new Error(`Not enough coins of type ${coinType}`);
+    }
+    const coin = tx.add(
+      coinWithBalance({ type: coinType, balance: BigInt(totalBalance) }),
     );
-    if (!mainCoin) {
-      throw new Error("Not enough balance");
-    }
-
-    const ifMerge = otherCoins.length > 0;
-
-    if (ifMerge) {
-      this.transaction.mergeCoins(mainCoin, otherCoins);
-    }
-
-    const out = this.transaction.splitCoins(
-      mainCoin,
-      amounts.map((amount) =>
-        typeof amount === "string" ? this.transaction.pure.u64(amount) : amount,
-      ),
-    );
-
-    if (ifMerge) {
-      this.transaction.transferObjects([mainCoin], this.sender);
-    }
-
+    const out = tx.splitCoins(coin, pureAmounts);
+    tx.transferObjects([coin], this.sender);
     return out;
   }
 
@@ -1999,6 +1997,29 @@ export class VirtueClient {
       inputs;
     if (!keepTransaction) this.resetTransaction();
     if (!this.sender) throw new Error("Sender is not set");
+    // The repayment is the debt as read on chain at execution. Its VUSD is sized
+    // from the debt read now, plus headroom for interest accrued meanwhile
+    // (0.1% + 0.001 VUSD), capped at what the wallet holds. When the wallet
+    // holds more than that, another VUSD intent can share the transaction;
+    // when the cap applies, the budget is the whole balance and it cannot
+    // (`coinWithBalance` sums the intents of a type).
+    const vusdType = this.config.COIN_TYPES.VUSD;
+    const [positions, { totalBalance }] = await Promise.all([
+      this.getDebtorPositions(this.sender),
+      this.iotaClient.getBalance({ owner: this.sender, coinType: vusdType }),
+    ]);
+    // `getDebtorPositions` returns nothing when its read fails; that is not a
+    // zero debt, and sizing for one would only abort on chain.
+    const position = positions.find((p) => p.collateral === collateralSymbol);
+    if (!position) {
+      throw new Error(
+        `Could not read the ${collateralSymbol} position to size its repayment.`,
+      );
+    }
+    const debtNow = BigInt(position.debtAmount);
+    const headroom = debtNow + debtNow / 1000n + 1000n;
+    const repaymentBudget =
+      headroom < BigInt(totalBalance) ? headroom : BigInt(totalBalance);
     this.transaction.setSender(this.sender);
     const collType = this.config.COIN_TYPES[collateralSymbol];
     const [collAmount, debtAmount] = this.transaction.moveCall({
@@ -2010,7 +2031,13 @@ export class VirtueClient {
         this.transaction.object.clock(),
       ],
     });
-    const repaymentCoin = await this.splitInputCoins("VUSD", debtAmount);
+    const repaymentFunds = this.transaction.add(
+      coinWithBalance({ type: vusdType, balance: repaymentBudget }),
+    );
+    const [repaymentCoin] = this.transaction.splitCoins(repaymentFunds, [
+      debtAmount,
+    ]);
+    this.transaction.transferObjects([repaymentFunds], this.sender);
     let updateRequest = this.debtorRequest({
       collateralSymbol,
       depositCoin: this.zeroCoin(collateralSymbol),
@@ -2239,8 +2266,8 @@ export class VirtueClient {
     }
     const { coinType } = this.psmPool(coin);
     this.transaction.setSender(this.sender);
-    // The coin split is the step that can fail (reads, balance), so it goes
-    // first: a failure then leaves nothing half-written in a kept transaction.
+    // Coin selection is resolved when the transaction is built, so a short
+    // balance surfaces at build time, not here.
     const [inputCoin] =
       direction === "in"
         ? await this.splitCoinsByType(coinType, amount)

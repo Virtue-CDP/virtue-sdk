@@ -342,10 +342,12 @@ declare class VirtueClient {
      */
     splitInputCoins(coinSymbol: COIN, ...amounts: (string | TransactionArgument)[]): Promise<TransactionResult>;
     /**
-     * @description split the needed coins of any non-IOTA coin type, merging the
-     * sender's coins of that type first. Everything that can fail (the coin
-     * reads, the balance check) runs before anything is written, since a
-     * `Transaction` cannot be rolled back.
+     * @description split the needed coins of any non-IOTA coin type. Coin
+     * selection is the SDK's `coinWithBalance` intent, resolved when the
+     * transaction is built: a shortfall surfaces then, as "Not enough coins of
+     * type ...", and the coins come from the transaction's sender. Until then
+     * the transaction carries an unresolved intent, so building it needs an RPC
+     * client.
      */
     splitCoinsByType(coinType: string, ...amounts: (string | TransactionArgument)[]): Promise<TransactionResult>;
     /**
