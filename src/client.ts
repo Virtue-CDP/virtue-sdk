@@ -2010,10 +2010,10 @@ export class VirtueClient {
     if (!this.sender) throw new Error("Sender is not set");
     // The repayment is the debt as read on chain at execution. Its VUSD is sized
     // from the debt read now, plus headroom for interest accrued meanwhile
-    // (0.1% + 0.001 VUSD). A wallet holding less is refused below, so with debt
-    // the budget is always the headroom, and VUSD left over beyond it can serve
-    // another intent in the transaction (`coinWithBalance` sums the intents of
-    // a type). Only a debt-free position is capped at what the wallet holds.
+    // (0.1% + 0.001 VUSD), capped at what the wallet holds. When the wallet
+    // holds more than that, another VUSD intent can share the transaction;
+    // when the cap applies, the budget is the whole balance and it cannot
+    // (`coinWithBalance` sums the intents of a type).
     const vusdType = this.config.COIN_TYPES.VUSD;
     const [positions, { totalBalance }] = await Promise.all([
       this.getDebtorPositions(this.sender),
@@ -2028,16 +2028,7 @@ export class VirtueClient {
       );
     }
     const debtNow = BigInt(position.debtAmount);
-    // The debt grows with interest before execution, and `coinWithBalance`
-    // resolves a zero budget to `coin::zero` (since 1.10), so a wallet short of
-    // it would only abort on chain, after signing. Require the same headroom
-    // the budget aims for: conservative by at most 0.1% + 0.001 VUSD.
     const headroom = debtNow + debtNow / 1000n + 1000n;
-    if (debtNow > 0n && BigInt(totalBalance) < headroom) {
-      throw new Error(
-        `Not enough VUSD to close the ${collateralSymbol} position: it owes ${debtNow} plus accruing interest, and needs up to ${headroom}; the wallet holds ${totalBalance}.`,
-      );
-    }
     const repaymentBudget =
       headroom < BigInt(totalBalance) ? headroom : BigInt(totalBalance);
     this.transaction.setSender(this.sender);
