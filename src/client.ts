@@ -24,6 +24,8 @@ import {
   Rewards,
   CdpPositionsResponse,
   PoolPositionsResponse,
+  PSM_COIN,
+  PsmPoolInfoList,
 } from "@/types";
 import { getObjectFields, parseVaultObject } from "@/utils";
 import { bcs } from "@iota/iota-sdk/bcs";
@@ -380,6 +382,54 @@ export class VirtueClient {
   }
 
   /**
+   * @description Get every PSM pool's live state, with the VUSD the PSM module
+   * may still mint. Empty where the network has no PSM.
+   */
+  async getPsmPools(): Promise<PsmPoolInfoList> {
+    const pools = Object.entries(this.config.PSM_POOLS ?? {}) as [
+      PSM_COIN,
+      NonNullable<ConfigType["PSM_POOLS"]>[PSM_COIN],
+    ][];
+    if (pools.length === 0 || !this.config.PSM_WITNESS_TYPE) return {};
+
+    const [treasuryRes, ...poolRes] = await this.iotaClient.multiGetObjects({
+      ids: [
+        this.config.TREASURY_OBJ.objectId,
+        ...pools.map(([, info]) => info!.pool.objectId),
+      ],
+      options: { showContent: true },
+    });
+
+    // The treasury keys each module's supply by its witness `TypeName`, which
+    // is written without the `0x` prefix.
+    const witness = this.config.PSM_WITNESS_TYPE.replace(/^0x/, "");
+    const supplyEntry = (
+      getObjectFields(treasuryRes)?.module_supply_map?.fields?.contents ?? []
+    ).find((e: any) => e.fields.key.fields.name.replace(/^0x/, "") === witness);
+    const limit = BigInt(supplyEntry?.fields.value.fields.limit ?? 0);
+    const supply = BigInt(supplyEntry?.fields.value.fields.supply ?? 0);
+    const mintableVusd = (limit > supply ? limit - supply : 0n).toString();
+
+    const result: PsmPoolInfoList = {};
+    pools.forEach(([coin, info], i) => {
+      const fields = getObjectFields(poolRes[i]);
+      if (!fields) return;
+      const feeConfig = fields.default_fee_config.fields;
+      result[coin] = {
+        coin,
+        coinType: info!.coinType,
+        decimal: Number(fields.decimal),
+        balance: String(fields.balance),
+        vusdSupply: String(fields.vusd_supply),
+        swapInFeeRate: Number(feeConfig.swap_in_fee_rate.fields.value) / 1e9,
+        swapOutFeeRate: Number(feeConfig.swap_out_fee_rate.fields.value) / 1e9,
+        mintableVusd,
+      };
+    });
+    return result;
+  }
+
+  /**
    * @description Get user's balances in stability pool
    */
   async getStabilityPoolBalances(
@@ -670,44 +720,55 @@ export class VirtueClient {
           ),
         );
       } else {
-        const coinType = this.config.COIN_TYPES[coinSymbol];
-        const { data: userCoins } = await this.iotaClient.getCoins({
-          owner: this.sender,
-          coinType,
-        });
-        const [mainCoin, ...otherCoins] = userCoins.map((coin) =>
-          this.transaction.objectRef({
-            objectId: coin.coinObjectId,
-            version: coin.version,
-            digest: coin.digest,
-          }),
+        return this.splitCoinsByType(
+          this.config.COIN_TYPES[coinSymbol],
+          ...amounts,
         );
-        if (!mainCoin) {
-          throw new Error("Not enough balance");
-        }
-
-        const ifMerge = otherCoins.length > 0;
-
-        if (ifMerge) {
-          this.transaction.mergeCoins(mainCoin, otherCoins);
-        }
-
-        const out = this.transaction.splitCoins(
-          mainCoin,
-          amounts.map((amount) =>
-            typeof amount === "string"
-              ? this.transaction.pure.u64(amount)
-              : amount,
-          ),
-        );
-
-        if (ifMerge) {
-          this.transaction.transferObjects([mainCoin], this.sender);
-        }
-
-        return out;
       }
     }
+  }
+
+  /**
+   * @description split the needed coins of any non-IOTA coin type, merging the
+   * sender's coins of that type first
+   */
+  async splitCoinsByType(
+    coinType: string,
+    ...amounts: (string | TransactionArgument)[]
+  ): Promise<TransactionResult> {
+    const { data: userCoins } = await this.iotaClient.getCoins({
+      owner: this.sender,
+      coinType,
+    });
+    const [mainCoin, ...otherCoins] = userCoins.map((coin) =>
+      this.transaction.objectRef({
+        objectId: coin.coinObjectId,
+        version: coin.version,
+        digest: coin.digest,
+      }),
+    );
+    if (!mainCoin) {
+      throw new Error("Not enough balance");
+    }
+
+    const ifMerge = otherCoins.length > 0;
+
+    if (ifMerge) {
+      this.transaction.mergeCoins(mainCoin, otherCoins);
+    }
+
+    const out = this.transaction.splitCoins(
+      mainCoin,
+      amounts.map((amount) =>
+        typeof amount === "string" ? this.transaction.pure.u64(amount) : amount,
+      ),
+    );
+
+    if (ifMerge) {
+      this.transaction.transferObjects([mainCoin], this.sender);
+    }
+
+    return out;
   }
 
   /* ----- Transaction Methods ----- */
@@ -762,6 +823,89 @@ export class VirtueClient {
 
   stabilityPoolObj(): TransactionArgument {
     return this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ);
+  }
+
+  /** The PSM package and `coin`'s pool, or a throw where there is no PSM. */
+  private psmPool(coin: PSM_COIN) {
+    const pool = this.config.PSM_POOLS?.[coin];
+    if (!this.config.PSM_PACKAGE_ID || !pool) {
+      throw new Error(`No PSM pool for ${coin} on ${this.network}`);
+    }
+    return { packageId: this.config.PSM_PACKAGE_ID, ...pool };
+  }
+
+  /**
+   * `&Option<AccountRequest>` for the PSM's partner fee lookup: `none` pays the
+   * default rates.
+   */
+  private psmPartner(
+    accountRequest?: TransactionArgument,
+  ): TransactionArgument {
+    const type = `${this.config.ORIGINAL_FRAMEWORK_PACKAGE_ID}::account::AccountRequest`;
+    return accountRequest
+      ? this.transaction.moveCall({
+          target: `0x1::option::some`,
+          typeArguments: [type],
+          arguments: [accountRequest],
+        })
+      : this.transaction.moveCall({
+          target: `0x1::option::none`,
+          typeArguments: [type],
+        });
+  }
+
+  /**
+   * @description PSM swap in: deposit `coin` and mint VUSD 1:1 after decimal
+   * scaling, less the swap-in fee (taken in VUSD)
+   * @param assetCoin: Coin<coin> to deposit
+   * @param accountRequest (optional): a partner's AccountRequest for its fee rate
+   * @returns Coin<VUSD>
+   */
+  psmSwapIn(inputs: {
+    coin: PSM_COIN;
+    assetCoin: TransactionArgument;
+    accountRequest?: TransactionArgument;
+  }): TransactionArgument {
+    const { coin, assetCoin, accountRequest } = inputs;
+    const { packageId, coinType, pool } = this.psmPool(coin);
+    const [vusdCoin] = this.transaction.moveCall({
+      target: `${packageId}::pool::swap_in`,
+      typeArguments: [coinType],
+      arguments: [
+        this.transaction.sharedObjectRef(pool),
+        this.treasuryObj(),
+        assetCoin,
+        this.psmPartner(accountRequest),
+      ],
+    });
+    return vusdCoin;
+  }
+
+  /**
+   * @description PSM swap out: burn VUSD and withdraw `coin` 1:1 after decimal
+   * scaling, less the swap-out fee (taken in `coin`)
+   * @param vusdCoin: Coin<VUSD> to burn
+   * @param accountRequest (optional): a partner's AccountRequest for its fee rate
+   * @returns Coin<coin>
+   */
+  psmSwapOut(inputs: {
+    coin: PSM_COIN;
+    vusdCoin: TransactionArgument;
+    accountRequest?: TransactionArgument;
+  }): TransactionArgument {
+    const { coin, vusdCoin, accountRequest } = inputs;
+    const { packageId, coinType, pool } = this.psmPool(coin);
+    const [assetCoin] = this.transaction.moveCall({
+      target: `${packageId}::pool::swap_out`,
+      typeArguments: [coinType],
+      arguments: [
+        this.transaction.sharedObjectRef(pool),
+        this.treasuryObj(),
+        vusdCoin,
+        this.psmPartner(accountRequest),
+      ],
+    });
+    return assetCoin;
   }
 
   /**
@@ -1960,6 +2104,47 @@ export class VirtueClient {
     this.buildClaimStabilityPoolRewards({ ...inputs, keepTransaction: true });
     const tx = this.getTransaction();
     this.resetTransaction();
+    return tx;
+  }
+
+  /**
+   * @description build and return Transaction of a PSM swap, sending the
+   * output to the sender. No oracle is involved: the PSM swaps at a fixed 1:1.
+   * @param coin: the PSM stablecoin, e.g. "USDT0"
+   * @param direction: "in" pays `coin` for VUSD, "out" pays VUSD for `coin`
+   * @param amount: raw units of what is paid
+   * @returns Transaction
+   */
+  async buildPsmSwapTransaction(inputs: {
+    coin: PSM_COIN;
+    direction: "in" | "out";
+    amount: string;
+    accountObj?: string | TransactionArgument;
+    keepTransaction?: boolean;
+  }): Promise<Transaction> {
+    const { coin, direction, amount, accountObj, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
+    if (this.sender === DUMMY_ADDRESS) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
+    const { coinType } = this.psmPool(coin);
+    const accountRequest = accountObj
+      ? this.newAccountRequest(accountObj)
+      : undefined;
+    const output =
+      direction === "in"
+        ? this.psmSwapIn({
+            coin,
+            assetCoin: (await this.splitCoinsByType(coinType, amount))[0],
+            accountRequest,
+          })
+        : this.psmSwapOut({
+            coin,
+            vusdCoin: (await this.splitInputCoins("VUSD", amount))[0],
+            accountRequest,
+          });
+    this.transaction.transferObjects([output], this.sender);
+    const tx = this.getTransaction();
+    if (!keepTransaction) this.resetTransaction();
     return tx;
   }
 

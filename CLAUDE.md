@@ -62,3 +62,8 @@ Several parts of `ConfigType` are optional and testnet omits them, so the code p
 
 - `INCENTIVE_PACKAGE_ID` / `POINT_PACKAGE_ID` gate `checkRequest`, `checkResponseForStabilityPool`, and `emitPoint`.
 - `PYTH_LAZER_PACKAGE_ID`, `PYTH_LAZER_STATE_OBJ`, `PYTH_LAZER_RULE_PACKAGE_ID`, `PYTH_LAZER_RULE_CONFIG_OBJ`, `PYTH_LAZER_FEED_IDS` and `PYTH_LAZER_CHANNEL` gate the verify and the `feed` call in `aggregatePrices`. **testnet has no `pyth_lazer_rule` deployment and so no oracle at all** — `aggregatePrices` there returns an empty record, borrowing refuses to build, and so does withdrawing from a position with debt.
+- `PSM_PACKAGE_ID`, `PSM_WITNESS_TYPE` and `PSM_POOLS` gate the PSM. Unlike the others, the PSM methods (`psmSwapIn`, `psmSwapOut`, `buildPsmSwapTransaction`) throw where it is absent, since there is no no-op version of a swap; `getPsmPools` returns `{}`.
+
+### The PSM (`virtue_psm`)
+
+Swaps a stablecoin (`PSM_COIN`, today only `USDT0`) and VUSD 1:1 after decimal scaling, with no oracle. `swap_in` mints VUSD and takes its fee in VUSD; `swap_out` burns VUSD and takes its fee in the stablecoin. Both round the converted amount down and the fee up. `quotePsmSwap` / `quotePsmSwapExactOut` in `src/utils/psm.ts` reproduce that math in bigint, so a UI quote matches the chain to the unit. A swap in is capped by the PSM module's supply limit on the treasury (`mintableVusd`, shared by every PSM pool); a swap out by the pool's balance and the VUSD minted through it. `swap_out` burns first, so an over-large swap out aborts in the treasury's `limited_supply` (102) before the pool's `EPoolNotEnough` (401). The partner argument is `&Option<AccountRequest>`; `none` pays the default fee rates.

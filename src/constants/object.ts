@@ -1,6 +1,8 @@
 import {
   COIN,
   COLLATERAL_COIN,
+  PSM_COIN,
+  PsmPoolObjectInfo,
   Rewarder,
   SharedObjectRef,
   VaultObjectInfo,
@@ -64,6 +66,15 @@ export type ConfigType = {
   STABILITY_POOL_REWARDERS: Rewarder[];
 
   VAULT_MAP: Record<COLLATERAL_COIN, VaultObjectInfo>;
+
+  /**
+   * Virtue PSM. Optional: testnet has no deployment, and the PSM methods throw
+   * there rather than build a call to nothing.
+   */
+  PSM_PACKAGE_ID?: string;
+  /** The PSM module's witness type, keying its supply on the treasury. */
+  PSM_WITNESS_TYPE?: string;
+  PSM_POOLS?: Partial<Record<PSM_COIN, PsmPoolObjectInfo>>;
 };
 
 export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
@@ -276,6 +287,24 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
           objectId:
             "0x53b6405d2672be1e73f8ddea1766dbda57f1fed677be58fbfedc9fdddaafdd26",
           initialSharedVersion: 437023773,
+          mutable: true,
+        },
+      },
+    },
+
+    PSM_PACKAGE_ID:
+      "0x3553aff52bad6b066d76bfe0d7a397772a83eb9bea8a8c9ae6b72d75c52defe3",
+    PSM_WITNESS_TYPE:
+      "0x3553aff52bad6b066d76bfe0d7a397772a83eb9bea8a8c9ae6b72d75c52defe3::witness::VirtuePSM",
+    PSM_POOLS: {
+      USDT0: {
+        coinType:
+          "0x25afeacdd3b0e757ae40aa4b9852261003e1dffeeb37d2c4f2904bb809807ac9::usdt0::USDT0",
+        decimal: 6,
+        pool: {
+          objectId:
+            "0xaf5fe5146d22ae8521e7597d6933a11eff09886d7ed292145ab264b738084465",
+          initialSharedVersion: 821170474,
           mutable: true,
         },
       },

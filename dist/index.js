@@ -180,6 +180,19 @@ var CONFIG = {
           mutable: true
         }
       }
+    },
+    PSM_PACKAGE_ID: "0x3553aff52bad6b066d76bfe0d7a397772a83eb9bea8a8c9ae6b72d75c52defe3",
+    PSM_WITNESS_TYPE: "0x3553aff52bad6b066d76bfe0d7a397772a83eb9bea8a8c9ae6b72d75c52defe3::witness::VirtuePSM",
+    PSM_POOLS: {
+      USDT0: {
+        coinType: "0x25afeacdd3b0e757ae40aa4b9852261003e1dffeeb37d2c4f2904bb809807ac9::usdt0::USDT0",
+        decimal: 6,
+        pool: {
+          objectId: "0xaf5fe5146d22ae8521e7597d6933a11eff09886d7ed292145ab264b738084465",
+          initialSharedVersion: 821170474,
+          mutable: true
+        }
+      }
     }
   },
   testnet: {
@@ -437,6 +450,45 @@ var parseVaultObject = (coinSymbol, fields) => {
   };
 };
 
+// src/utils/psm.ts
+var WAD = 10n ** 9n;
+var feeRateValue = (rate) => BigInt(Math.round(rate * 1e9));
+var ceilMul = (rateValue, amount) => (rateValue * amount + WAD - 1n) / WAD;
+var conversionValue = (poolDecimal) => {
+  const vusdDecimal = COIN_DECIMALS.VUSD;
+  return vusdDecimal >= poolDecimal ? 10n ** BigInt(vusdDecimal - poolDecimal) * WAD : WAD / 10n ** BigInt(poolDecimal - vusdDecimal);
+};
+var quotePsmSwap = (pool, direction, amountIn) => {
+  const conversion = conversionValue(pool.decimal);
+  if (direction === "in") {
+    const minted = amountIn * conversion / WAD;
+    const fee2 = ceilMul(feeRateValue(pool.swapInFeeRate), minted);
+    const error2 = minted > BigInt(pool.mintableVusd) ? "SUPPLY_LIMIT" : void 0;
+    return { direction, amountIn, amountOut: minted - fee2, fee: fee2, error: error2 };
+  }
+  const assetOut = amountIn * WAD / conversion;
+  const fee = ceilMul(feeRateValue(pool.swapOutFeeRate), assetOut);
+  const error = assetOut > BigInt(pool.balance) || amountIn > BigInt(pool.vusdSupply) ? "POOL_NOT_ENOUGH" : void 0;
+  return { direction, amountIn, amountOut: assetOut - fee, fee, error };
+};
+var quotePsmSwapExactOut = (pool, direction, amountOut) => {
+  if (amountOut <= 0n) return quotePsmSwap(pool, direction, 0n);
+  const conversion = conversionValue(pool.decimal);
+  const feeFree = direction === "in" ? amountOut * WAD / conversion : amountOut * conversion / WAD;
+  let hi = feeFree + 1n;
+  for (let i = 0; quotePsmSwap(pool, direction, hi).amountOut < amountOut; i++) {
+    if (i >= 64) return { ...quotePsmSwap(pool, direction, hi), amountOut: 0n };
+    hi *= 2n;
+  }
+  let lo = 0n;
+  while (lo < hi) {
+    const mid = (lo + hi) / 2n;
+    if (quotePsmSwap(pool, direction, mid).amountOut >= amountOut) hi = mid;
+    else lo = mid + 1n;
+  }
+  return quotePsmSwap(pool, direction, lo);
+};
+
 // src/client.ts
 var _bcs = require('@iota/iota-sdk/bcs');
 
@@ -669,6 +721,43 @@ var VirtueClient = class _VirtueClient {
     return { vusdBalance: Number(fields.vusd_balance) };
   }
   /**
+   * @description Get every PSM pool's live state, with the VUSD the PSM module
+   * may still mint. Empty where the network has no PSM.
+   */
+  async getPsmPools() {
+    const pools = Object.entries(_nullishCoalesce(this.config.PSM_POOLS, () => ( {})));
+    if (pools.length === 0 || !this.config.PSM_WITNESS_TYPE) return {};
+    const [treasuryRes, ...poolRes] = await this.iotaClient.multiGetObjects({
+      ids: [
+        this.config.TREASURY_OBJ.objectId,
+        ...pools.map(([, info]) => info.pool.objectId)
+      ],
+      options: { showContent: true }
+    });
+    const witness = this.config.PSM_WITNESS_TYPE.replace(/^0x/, "");
+    const supplyEntry = (_nullishCoalesce(_optionalChain([getObjectFields, 'call', _17 => _17(treasuryRes), 'optionalAccess', _18 => _18.module_supply_map, 'optionalAccess', _19 => _19.fields, 'optionalAccess', _20 => _20.contents]), () => ( []))).find((e) => e.fields.key.fields.name.replace(/^0x/, "") === witness);
+    const limit = BigInt(_nullishCoalesce(_optionalChain([supplyEntry, 'optionalAccess', _21 => _21.fields, 'access', _22 => _22.value, 'access', _23 => _23.fields, 'access', _24 => _24.limit]), () => ( 0)));
+    const supply = BigInt(_nullishCoalesce(_optionalChain([supplyEntry, 'optionalAccess', _25 => _25.fields, 'access', _26 => _26.value, 'access', _27 => _27.fields, 'access', _28 => _28.supply]), () => ( 0)));
+    const mintableVusd = (limit > supply ? limit - supply : 0n).toString();
+    const result = {};
+    pools.forEach(([coin, info], i) => {
+      const fields = getObjectFields(poolRes[i]);
+      if (!fields) return;
+      const feeConfig = fields.default_fee_config.fields;
+      result[coin] = {
+        coin,
+        coinType: info.coinType,
+        decimal: Number(fields.decimal),
+        balance: String(fields.balance),
+        vusdSupply: String(fields.vusd_supply),
+        swapInFeeRate: Number(feeConfig.swap_in_fee_rate.fields.value) / 1e9,
+        swapOutFeeRate: Number(feeConfig.swap_out_fee_rate.fields.value) / 1e9,
+        mintableVusd
+      };
+    });
+    return result;
+  }
+  /**
    * @description Get user's balances in stability pool
    */
   async getStabilityPoolBalances(account) {
@@ -687,7 +776,7 @@ var VirtueClient = class _VirtueClient {
     Object.keys(this.config.VAULT_MAP).map((collSymbol) => {
       collBalances[collSymbol] = 0;
     });
-    if (_optionalChain([res, 'access', _17 => _17.data, 'optionalAccess', _18 => _18.content, 'optionalAccess', _19 => _19.dataType]) !== "moveObject") {
+    if (_optionalChain([res, 'access', _29 => _29.data, 'optionalAccess', _30 => _30.content, 'optionalAccess', _31 => _31.dataType]) !== "moveObject") {
       return { vusdBalance: 0, collBalances };
     }
     const fields = res.data.content.fields;
@@ -811,7 +900,7 @@ var VirtueClient = class _VirtueClient {
       transactionBlock: tx,
       sender: this.sender
     });
-    if (!res.results || !_optionalChain([res, 'access', _20 => _20.results, 'access', _21 => _21[0], 'optionalAccess', _22 => _22.returnValues])) {
+    if (!res.results || !_optionalChain([res, 'access', _32 => _32.results, 'access', _33 => _33[0], 'optionalAccess', _34 => _34.returnValues])) {
       return {
         positions: [],
         nextCursor: null
@@ -852,7 +941,7 @@ var VirtueClient = class _VirtueClient {
       transactionBlock: tx,
       sender: this.sender
     });
-    if (!res.results || !_optionalChain([res, 'access', _23 => _23.results, 'access', _24 => _24[0], 'optionalAccess', _25 => _25.returnValues])) {
+    if (!res.results || !_optionalChain([res, 'access', _35 => _35.results, 'access', _36 => _36[0], 'optionalAccess', _37 => _37.returnValues])) {
       return {
         positions: [],
         nextCursor: null
@@ -913,37 +1002,46 @@ var VirtueClient = class _VirtueClient {
           )
         );
       } else {
-        const coinType = this.config.COIN_TYPES[coinSymbol];
-        const { data: userCoins } = await this.iotaClient.getCoins({
-          owner: this.sender,
-          coinType
-        });
-        const [mainCoin, ...otherCoins] = userCoins.map(
-          (coin) => this.transaction.objectRef({
-            objectId: coin.coinObjectId,
-            version: coin.version,
-            digest: coin.digest
-          })
+        return this.splitCoinsByType(
+          this.config.COIN_TYPES[coinSymbol],
+          ...amounts
         );
-        if (!mainCoin) {
-          throw new Error("Not enough balance");
-        }
-        const ifMerge = otherCoins.length > 0;
-        if (ifMerge) {
-          this.transaction.mergeCoins(mainCoin, otherCoins);
-        }
-        const out = this.transaction.splitCoins(
-          mainCoin,
-          amounts.map(
-            (amount) => typeof amount === "string" ? this.transaction.pure.u64(amount) : amount
-          )
-        );
-        if (ifMerge) {
-          this.transaction.transferObjects([mainCoin], this.sender);
-        }
-        return out;
       }
     }
+  }
+  /**
+   * @description split the needed coins of any non-IOTA coin type, merging the
+   * sender's coins of that type first
+   */
+  async splitCoinsByType(coinType, ...amounts) {
+    const { data: userCoins } = await this.iotaClient.getCoins({
+      owner: this.sender,
+      coinType
+    });
+    const [mainCoin, ...otherCoins] = userCoins.map(
+      (coin) => this.transaction.objectRef({
+        objectId: coin.coinObjectId,
+        version: coin.version,
+        digest: coin.digest
+      })
+    );
+    if (!mainCoin) {
+      throw new Error("Not enough balance");
+    }
+    const ifMerge = otherCoins.length > 0;
+    if (ifMerge) {
+      this.transaction.mergeCoins(mainCoin, otherCoins);
+    }
+    const out = this.transaction.splitCoins(
+      mainCoin,
+      amounts.map(
+        (amount) => typeof amount === "string" ? this.transaction.pure.u64(amount) : amount
+      )
+    );
+    if (ifMerge) {
+      this.transaction.transferObjects([mainCoin], this.sender);
+    }
+    return out;
   }
   /* ----- Transaction Methods ----- */
   /**
@@ -987,6 +1085,73 @@ var VirtueClient = class _VirtueClient {
   }
   stabilityPoolObj() {
     return this.transaction.sharedObjectRef(this.config.STABILITY_POOL_OBJ);
+  }
+  /** The PSM package and `coin`'s pool, or a throw where there is no PSM. */
+  psmPool(coin) {
+    const pool = _optionalChain([this, 'access', _38 => _38.config, 'access', _39 => _39.PSM_POOLS, 'optionalAccess', _40 => _40[coin]]);
+    if (!this.config.PSM_PACKAGE_ID || !pool) {
+      throw new Error(`No PSM pool for ${coin} on ${this.network}`);
+    }
+    return { packageId: this.config.PSM_PACKAGE_ID, ...pool };
+  }
+  /**
+   * `&Option<AccountRequest>` for the PSM's partner fee lookup: `none` pays the
+   * default rates.
+   */
+  psmPartner(accountRequest) {
+    const type = `${this.config.ORIGINAL_FRAMEWORK_PACKAGE_ID}::account::AccountRequest`;
+    return accountRequest ? this.transaction.moveCall({
+      target: `0x1::option::some`,
+      typeArguments: [type],
+      arguments: [accountRequest]
+    }) : this.transaction.moveCall({
+      target: `0x1::option::none`,
+      typeArguments: [type]
+    });
+  }
+  /**
+   * @description PSM swap in: deposit `coin` and mint VUSD 1:1 after decimal
+   * scaling, less the swap-in fee (taken in VUSD)
+   * @param assetCoin: Coin<coin> to deposit
+   * @param accountRequest (optional): a partner's AccountRequest for its fee rate
+   * @returns Coin<VUSD>
+   */
+  psmSwapIn(inputs) {
+    const { coin, assetCoin, accountRequest } = inputs;
+    const { packageId, coinType, pool } = this.psmPool(coin);
+    const [vusdCoin] = this.transaction.moveCall({
+      target: `${packageId}::pool::swap_in`,
+      typeArguments: [coinType],
+      arguments: [
+        this.transaction.sharedObjectRef(pool),
+        this.treasuryObj(),
+        assetCoin,
+        this.psmPartner(accountRequest)
+      ]
+    });
+    return vusdCoin;
+  }
+  /**
+   * @description PSM swap out: burn VUSD and withdraw `coin` 1:1 after decimal
+   * scaling, less the swap-out fee (taken in `coin`)
+   * @param vusdCoin: Coin<VUSD> to burn
+   * @param accountRequest (optional): a partner's AccountRequest for its fee rate
+   * @returns Coin<coin>
+   */
+  psmSwapOut(inputs) {
+    const { coin, vusdCoin, accountRequest } = inputs;
+    const { packageId, coinType, pool } = this.psmPool(coin);
+    const [assetCoin] = this.transaction.moveCall({
+      target: `${packageId}::pool::swap_out`,
+      typeArguments: [coinType],
+      arguments: [
+        this.transaction.sharedObjectRef(pool),
+        this.treasuryObj(),
+        vusdCoin,
+        this.psmPartner(accountRequest)
+      ]
+    });
+    return assetCoin;
   }
   /**
    * @description Create a AccountRequest
@@ -1070,7 +1235,7 @@ var VirtueClient = class _VirtueClient {
    * of a failed transaction.
    */
   lazerRuleFeeds(symbol) {
-    return _optionalChain([this, 'access', _26 => _26.config, 'access', _27 => _27.PYTH_LAZER_FEED_IDS, 'optionalAccess', _28 => _28[symbol]]) !== void 0 && !!this.config.PYTH_LAZER_PACKAGE_ID && !!this.config.PYTH_LAZER_STATE_OBJ && !!this.config.PYTH_LAZER_RULE_PACKAGE_ID && !!this.config.PYTH_LAZER_RULE_CONFIG_OBJ;
+    return _optionalChain([this, 'access', _41 => _41.config, 'access', _42 => _42.PYTH_LAZER_FEED_IDS, 'optionalAccess', _43 => _43[symbol]]) !== void 0 && !!this.config.PYTH_LAZER_PACKAGE_ID && !!this.config.PYTH_LAZER_STATE_OBJ && !!this.config.PYTH_LAZER_RULE_PACKAGE_ID && !!this.config.PYTH_LAZER_RULE_CONFIG_OBJ;
   }
   /**
    * @description Build the aggregation for `symbols` on a transaction of its own
@@ -1126,7 +1291,7 @@ var VirtueClient = class _VirtueClient {
         { cause: error }
       );
     }
-    return _optionalChain([inspect, 'optionalAccess', _29 => _29.effects, 'access', _30 => _30.status, 'access', _31 => _31.status]) === "success";
+    return _optionalChain([inspect, 'optionalAccess', _44 => _44.effects, 'access', _45 => _45.status, 'access', _46 => _46.status]) === "success";
   }
   /**
    * @description Fetch one signed Lazer update for `feedId`, without touching
@@ -1189,7 +1354,7 @@ var VirtueClient = class _VirtueClient {
    * dApp consumer. `fromHEX` works in both runtimes.
    */
   lazerUpdateFromResponse(body) {
-    const hex = _optionalChain([body, 'optionalAccess', _32 => _32.leEcdsa, 'optionalAccess', _33 => _33.data]);
+    const hex = _optionalChain([body, 'optionalAccess', _47 => _47.leEcdsa, 'optionalAccess', _48 => _48.data]);
     if (typeof hex !== "string" || hex.length === 0) return null;
     try {
       return _utils.fromHEX.call(void 0, hex);
@@ -1230,7 +1395,7 @@ var VirtueClient = class _VirtueClient {
       this.priceableSymbols().map(async (symbol) => {
         try {
           const inspect = await this.inspectAggregation(prepared, [symbol]);
-          return _optionalChain([inspect, 'optionalAccess', _34 => _34.effects, 'access', _35 => _35.status, 'access', _36 => _36.status]) === "success" ? [symbol] : [];
+          return _optionalChain([inspect, 'optionalAccess', _49 => _49.effects, 'access', _50 => _50.status, 'access', _51 => _51.status]) === "success" ? [symbol] : [];
         } catch (e4) {
           return [];
         }
@@ -1962,6 +2127,35 @@ var VirtueClient = class _VirtueClient {
     return tx;
   }
   /**
+   * @description build and return Transaction of a PSM swap, sending the
+   * output to the sender. No oracle is involved: the PSM swaps at a fixed 1:1.
+   * @param coin: the PSM stablecoin, e.g. "USDT0"
+   * @param direction: "in" pays `coin` for VUSD, "out" pays VUSD for `coin`
+   * @param amount: raw units of what is paid
+   * @returns Transaction
+   */
+  async buildPsmSwapTransaction(inputs) {
+    const { coin, direction, amount, accountObj, keepTransaction } = inputs;
+    if (!keepTransaction) this.resetTransaction();
+    if (this.sender === DUMMY_ADDRESS) throw new Error("Sender is not set");
+    this.transaction.setSender(this.sender);
+    const { coinType } = this.psmPool(coin);
+    const accountRequest = accountObj ? this.newAccountRequest(accountObj) : void 0;
+    const output = direction === "in" ? this.psmSwapIn({
+      coin,
+      assetCoin: (await this.splitCoinsByType(coinType, amount))[0],
+      accountRequest
+    }) : this.psmSwapOut({
+      coin,
+      vusdCoin: (await this.splitInputCoins("VUSD", amount))[0],
+      accountRequest
+    });
+    this.transaction.transferObjects([output], this.sender);
+    const tx = this.getTransaction();
+    if (!keepTransaction) this.resetTransaction();
+    return tx;
+  }
+  /**
    * @description instruction for emitting point request
    */
   emitPoint(collateralSymbol, response) {
@@ -1999,5 +2193,7 @@ var VirtueClient = class _VirtueClient {
 
 
 
-exports.COIN_DECIMALS = COIN_DECIMALS; exports.CONFIG = CONFIG; exports.DEFAULT_LAZER_ENDPOINTS = DEFAULT_LAZER_ENDPOINTS; exports.LAZER_PROPERTIES = LAZER_PROPERTIES; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject;
+
+
+exports.COIN_DECIMALS = COIN_DECIMALS; exports.CONFIG = CONFIG; exports.DEFAULT_LAZER_ENDPOINTS = DEFAULT_LAZER_ENDPOINTS; exports.LAZER_PROPERTIES = LAZER_PROPERTIES; exports.ObjectContentFields = ObjectContentFields; exports.U64FromBytes = U64FromBytes; exports.VirtueClient = VirtueClient; exports.formatBigInt = formatBigInt; exports.formatUnits = formatUnits; exports.getCoinSymbol = getCoinSymbol; exports.getCoinType = getCoinType; exports.getIotaObjectData = getIotaObjectData; exports.getMoveObject = getMoveObject; exports.getObjectFields = getObjectFields; exports.getObjectGenerics = getObjectGenerics; exports.getObjectNames = getObjectNames; exports.parseUnits = parseUnits; exports.parseVaultObject = parseVaultObject; exports.quotePsmSwap = quotePsmSwap; exports.quotePsmSwapExactOut = quotePsmSwapExactOut;
 //# sourceMappingURL=index.js.map
