@@ -105,6 +105,67 @@ describe("PSM on chain", () => {
     "0x08e00db614b1024014b33f86e9d0baf76a48649b317d1517536502c521d20322";
   const client = new VirtueClient({ sender: walletAddress });
 
+  /**
+   * Strict dry runs, unlike dev-inspection, enforce every execution rule,
+   * including that no value without `drop` (a leftover coin) is left unused.
+   */
+  const strictDryRun = async (c: VirtueClient, tx: any) => {
+    const bytes = await tx.build({ client: c.getIotaClient() });
+    return c.getIotaClient().dryRunTransactionBlock({ transactionBlock: bytes });
+  };
+  /** Holds 1 USDT0 (a single coin) and IOTA for gas. */
+  const USDT0_HOLDER =
+    "0xe94c13d3751fde8d07a7e36744f64fdd905c56edf54b5f6d77daec78925ae88b";
+
+  it("dry-runs a real swap in of 1 USDT0", async () => {
+    const holder = new VirtueClient({ sender: USDT0_HOLDER });
+    const usdt0 = holder.config.PSM_POOLS!.USDT0!.coinType;
+    const tx = await holder.buildPsmSwapTransaction({
+      coin: "USDT0",
+      direction: "in",
+      amount: "1000000",
+    });
+    const res = await strictDryRun(holder, tx);
+    expect(res.effects.status).toEqual({ status: "success" });
+    const change = (type: string) =>
+      res.balanceChanges.find((b: any) => b.coinType === type)?.amount;
+    expect(change(usdt0)).toBe("-1000000");
+    expect(BigInt(change(holder.config.COIN_TYPES.VUSD) ?? "0")).toBeGreaterThan(0n);
+  });
+
+  it("dry-runs a known-amount split with a merge", async () => {
+    // The wallet's stIOTA is in two coins, so the intent merges before it
+    // splits; the zero remainder must be destroyed for this to pass.
+    client.resetTransaction();
+    const tx = client.getTransaction();
+    tx.setSender(walletAddress);
+    const [a, b] = await client.splitCoinsByType(
+      client.config.COIN_TYPES.stIOTA,
+      "1000",
+      "2000",
+    );
+    tx.transferObjects([a, b], walletAddress);
+    const res = await strictDryRun(client, tx);
+    expect(res.effects.status).toEqual({ status: "success" });
+    client.resetTransaction();
+  });
+
+  it("dry-runs an amount only known on chain", async () => {
+    // The whole VUSD balance goes in through one intent; the amount is split
+    // from it and the rest returned to the sender.
+    client.resetTransaction();
+    const tx = client.getTransaction();
+    tx.setSender(walletAddress);
+    const [onChain] = await client.splitCoinsByType(
+      client.config.COIN_TYPES.VUSD,
+      tx.pure.u64(2000),
+    );
+    tx.transferObjects([onChain], walletAddress);
+    const res = await strictDryRun(client, tx);
+    expect(res.effects.status).toEqual({ status: "success" });
+    client.resetTransaction();
+  });
+
   it("reads the USDT0 pool", async () => {
     const { USDT0 } = await client.getPsmPools();
     expect(USDT0).toBeDefined();
