@@ -89,13 +89,24 @@ export type PsmPoolInfo = {
   balance: string;
   /** VUSD minted through this pool and not yet burned back. */
   vusdSupply: string;
+  /** Default fee rates, paid by any swap without a partner `AccountRequest`. */
   swapInFeeRate: number;
   swapOutFeeRate: number;
+  /** Fee rates for partners, keyed by their normalized `AccountRequest` address. */
+  partnerFeeRates: Record<
+    string,
+    { swapInFeeRate: number; swapOutFeeRate: number }
+  >;
   /**
    * VUSD the PSM module may still mint (`limit - supply` on the treasury),
    * shared by every PSM pool. A swap in that would mint past it aborts.
    */
   mintableVusd: string;
+  /**
+   * VUSD the PSM module has minted and not burned, across every PSM pool. A
+   * swap out burns against it first, so it caps a swap out too.
+   */
+  moduleVusdSupply: string;
 };
 
 export type PsmPoolInfoList = Partial<Record<PSM_COIN, PsmPoolInfo>>;

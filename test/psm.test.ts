@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { normalizeIotaAddress } from "@iota/iota-sdk/utils";
 import {
   PsmPoolInfo,
   VirtueClient,
@@ -14,7 +15,9 @@ const pool = (overrides: Partial<PsmPoolInfo> = {}): PsmPoolInfo => ({
   vusdSupply: "1000000000",
   swapInFeeRate: 0,
   swapOutFeeRate: 0.001,
+  partnerFeeRates: {},
   mintableVusd: "100000000",
+  moduleVusdSupply: "1000000000",
   ...overrides,
 });
 
@@ -55,6 +58,37 @@ describe("PSM quotes", () => {
     );
   });
 
+  it("flags a swap out past the module's supply across pools", () => {
+    // This pool minted enough, but the module's shared supply (which the burn
+    // runs against first) is smaller.
+    const q = quotePsmSwap(pool({ moduleVusdSupply: "10" }), "out", 11n);
+    expect(q.error).toBe("POOL_NOT_ENOUGH");
+  });
+
+  it("uses a partner's fee rates only for that partner", () => {
+    const partner = "0xabc";
+    const p = pool({
+      partnerFeeRates: {
+        [normalizeIotaAddress(partner)]: {
+          swapInFeeRate: 0,
+          swapOutFeeRate: 0,
+        },
+      },
+    });
+    expect(quotePsmSwap(p, "out", 1_500n, partner).fee).toBe(0n);
+    expect(quotePsmSwap(p, "out", 1_500n, "0xdef").fee).toBe(2n);
+    expect(quotePsmSwap(p, "out", 1_500n).fee).toBe(2n);
+    expect(quotePsmSwapExactOut(p, "out", 1_500n, partner).amountIn).toBe(
+      1_500n,
+    );
+  });
+
+  it("refuses a pool decimal the chain cannot have", () => {
+    expect(() => quotePsmSwap(pool({ decimal: 10 }), "in", 1n)).toThrow(
+      /Unsupported PSM pool decimal/,
+    );
+  });
+
   it("finds the smallest input for an exact output", () => {
     for (const out of [1n, 999n, 1_000n, 1_498n, 1_499n, 123_456_789n]) {
       const q = quotePsmSwapExactOut(pool(), "out", out);
@@ -78,6 +112,48 @@ describe("PSM on chain", () => {
     expect(USDT0!.swapInFeeRate).toBeGreaterThanOrEqual(0);
     expect(USDT0!.swapOutFeeRate).toBeGreaterThanOrEqual(0);
     expect(BigInt(USDT0!.mintableVusd)).toBeGreaterThanOrEqual(0n);
+    expect(BigInt(USDT0!.moduleVusdSupply)).toBeGreaterThanOrEqual(
+      BigInt(USDT0!.vusdSupply),
+    );
+  });
+
+  it("throws rather than read a missing supply entry as zero", async () => {
+    const other = new VirtueClient({ sender: walletAddress });
+    other.config = {
+      ...other.config,
+      PSM_WITNESS_TYPE: "0x1234::witness::NotThePsm",
+    };
+    await expect(other.getPsmPools()).rejects.toThrow(/no supply entry/);
+  });
+
+  it("rejects a zero amount before writing anything", async () => {
+    client.resetTransaction();
+    await expect(
+      client.buildPsmSwapTransaction({
+        coin: "USDT0",
+        direction: "in",
+        amount: "0",
+        keepTransaction: true,
+      }),
+    ).rejects.toThrow(/positive integer/);
+    expect(client.getTransaction().getData().commands).toHaveLength(0);
+  });
+
+  it("leaves a kept transaction untouched when the balance is short", async () => {
+    // The test wallet holds no USDT0, so the coin read fails; nothing of the
+    // swap (the partner request included) may have been written by then.
+    client.resetTransaction();
+    await expect(
+      client.buildPsmSwapTransaction({
+        coin: "USDT0",
+        direction: "in",
+        amount: "1",
+        accountObj: walletAddress,
+        keepTransaction: true,
+      }),
+    ).rejects.toThrow(/Not enough balance/);
+    expect(client.getTransaction().getData().commands).toHaveLength(0);
+    client.resetTransaction();
   });
 
   it("calls swap_in and swap_out with the right types", async () => {
@@ -93,27 +169,34 @@ describe("PSM on chain", () => {
     const vusdCoin = client.psmSwapIn({ coin: "USDT0", assetCoin });
     const assetBack = client.psmSwapOut({ coin: "USDT0", vusdCoin });
     tx.transferObjects([assetBack], walletAddress);
-    const res = await client
-      .getIotaClient()
-      .devInspectTransactionBlock({
-        transactionBlock: tx,
-        sender: walletAddress,
-      });
+    const res = await client.getIotaClient().devInspectTransactionBlock({
+      transactionBlock: tx,
+      sender: walletAddress,
+    });
     expect(res.error ?? null).toBeNull();
     expect(res.effects.status.status).toBe("success");
   });
 
   it("builds a swap out that the chain judges against the pool", async () => {
+    const amount = 1_000_000n;
+    const vusd = await client
+      .getIotaClient()
+      .getBalance({
+        owner: walletAddress,
+        coinType: client.config.COIN_TYPES.VUSD,
+      });
+    // Without 1 VUSD in the test wallet the build fails for a reason that has
+    // nothing to do with the pool, so there is nothing to judge.
+    if (BigInt(vusd.totalBalance) < amount) return;
+
     const { USDT0 } = await client.getPsmPools();
+    const covered = quotePsmSwap(USDT0!, "out", amount).error === undefined;
     await client.buildPsmSwapTransaction({
       coin: "USDT0",
       direction: "out",
-      amount: "1000000",
+      amount: amount.toString(),
       keepTransaction: true,
     });
-    const covered =
-      BigInt(USDT0!.vusdSupply) >= 1_000_000n &&
-      BigInt(USDT0!.balance) >= 1_000_000n;
     const run = client
       .dryrunTransaction()
       .finally(() => client.resetTransaction());
@@ -122,8 +205,9 @@ describe("PSM on chain", () => {
     } else {
       // swap_out burns first, so a pool that never minted this much aborts in
       // the treasury's limited_supply (102) before its own EPoolNotEnough (401).
+      // Gas estimation reports the abort with the constant and the code.
       await expect(run).rejects.toThrow(
-        /err_supply_not_enough|err_pool_not_enough/,
+        /err_supply_not_enough|err_pool_not_enough|MoveAbort.*\b(102|401)\b|abort code: (102|401)\b/,
       );
     }
   });

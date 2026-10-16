@@ -121,6 +121,12 @@ const getCoinSymbol = (coinType: string, coinTypes: Record<COIN, string>) => {
 
 const DUMMY_ADDRESS = normalizeIotaAddress("0x0");
 
+/** A `TypeName` as the treasury stores it: no `0x`, address padded to 64 hex. */
+const normalizeTypeName = (type: string): string => {
+  const [address, ...rest] = type.split("::");
+  return [normalizeIotaAddress(address).replace(/^0x/, ""), ...rest].join("::");
+};
+
 /** One wording for every check that refuses a build for want of a price. */
 const noPriceError = (symbol: COLLATERAL_COIN) =>
   new Error(
@@ -400,30 +406,49 @@ export class VirtueClient {
       options: { showContent: true },
     });
 
+    // A read that fails must not look like a limit of zero: that would block
+    // every swap in with no sign anything went wrong. So nothing here defaults.
+    const treasury = getObjectFields(treasuryRes);
+    if (!treasury) throw new Error("Could not read the VUSD treasury");
     // The treasury keys each module's supply by its witness `TypeName`, which
-    // is written without the `0x` prefix.
-    const witness = this.config.PSM_WITNESS_TYPE.replace(/^0x/, "");
+    // is written without the `0x` prefix and names the package's original id.
+    const witness = normalizeTypeName(this.config.PSM_WITNESS_TYPE);
     const supplyEntry = (
-      getObjectFields(treasuryRes)?.module_supply_map?.fields?.contents ?? []
-    ).find((e: any) => e.fields.key.fields.name.replace(/^0x/, "") === witness);
-    const limit = BigInt(supplyEntry?.fields.value.fields.limit ?? 0);
-    const supply = BigInt(supplyEntry?.fields.value.fields.supply ?? 0);
+      treasury.module_supply_map?.fields?.contents ?? []
+    ).find((e: any) => normalizeTypeName(e.fields.key.fields.name) === witness);
+    if (!supplyEntry) {
+      throw new Error(
+        `The VUSD treasury has no supply entry for ${this.config.PSM_WITNESS_TYPE}`,
+      );
+    }
+    const limit = BigInt(supplyEntry.fields.value.fields.limit);
+    const supply = BigInt(supplyEntry.fields.value.fields.supply);
     const mintableVusd = (limit > supply ? limit - supply : 0n).toString();
+
+    const feeRates = (feeConfig: any) => ({
+      swapInFeeRate: Number(feeConfig.swap_in_fee_rate.fields.value) / 1e9,
+      swapOutFeeRate: Number(feeConfig.swap_out_fee_rate.fields.value) / 1e9,
+    });
 
     const result: PsmPoolInfoList = {};
     pools.forEach(([coin, info], i) => {
       const fields = getObjectFields(poolRes[i]);
-      if (!fields) return;
-      const feeConfig = fields.default_fee_config.fields;
+      if (!fields) throw new Error(`Could not read the PSM pool for ${coin}`);
       result[coin] = {
         coin,
         coinType: info!.coinType,
         decimal: Number(fields.decimal),
         balance: String(fields.balance),
         vusdSupply: String(fields.vusd_supply),
-        swapInFeeRate: Number(feeConfig.swap_in_fee_rate.fields.value) / 1e9,
-        swapOutFeeRate: Number(feeConfig.swap_out_fee_rate.fields.value) / 1e9,
+        ...feeRates(fields.default_fee_config.fields),
+        partnerFeeRates: Object.fromEntries(
+          (fields.partner_fee_configs?.fields?.contents ?? []).map((e: any) => [
+            normalizeIotaAddress(e.fields.key),
+            feeRates(e.fields.value.fields),
+          ]),
+        ),
         mintableVusd,
+        moduleVusdSupply: supply.toString(),
       };
     });
     return result;
@@ -730,16 +755,44 @@ export class VirtueClient {
 
   /**
    * @description split the needed coins of any non-IOTA coin type, merging the
-   * sender's coins of that type first
+   * sender's coins of that type first. Everything that can fail (the coin
+   * reads, the balance check) runs before anything is written, since a
+   * `Transaction` cannot be rolled back.
    */
   async splitCoinsByType(
     coinType: string,
     ...amounts: (string | TransactionArgument)[]
   ): Promise<TransactionResult> {
-    const { data: userCoins } = await this.iotaClient.getCoins({
-      owner: this.sender,
-      coinType,
-    });
+    // Amounts given as transaction arguments are only known on chain.
+    const total = amounts.every((a) => typeof a === "string")
+      ? amounts.reduce((sum, a) => sum + BigInt(a as string), 0n)
+      : undefined;
+    if (total === 0n) {
+      return this.transaction.moveCall({
+        target: "0x2::coin::zero",
+        typeArguments: [coinType],
+      });
+    }
+
+    // `getCoins` is paginated: read until the coins cover the total, or all of
+    // them when the total is not known.
+    const userCoins: Awaited<ReturnType<IotaClient["getCoins"]>>["data"] = [];
+    let held = 0n;
+    let cursor: string | null | undefined = undefined;
+    do {
+      const page = await this.iotaClient.getCoins({
+        owner: this.sender,
+        coinType,
+        cursor,
+      });
+      userCoins.push(...page.data);
+      held += page.data.reduce((sum, coin) => sum + BigInt(coin.balance), 0n);
+      cursor = page.hasNextPage ? page.nextCursor : null;
+    } while (cursor && (total === undefined || held < total));
+    if (userCoins.length === 0 || (total !== undefined && held < total)) {
+      throw new Error("Not enough balance");
+    }
+
     const [mainCoin, ...otherCoins] = userCoins.map((coin) =>
       this.transaction.objectRef({
         objectId: coin.coinObjectId,
@@ -2113,6 +2166,9 @@ export class VirtueClient {
    * @param coin: the PSM stablecoin, e.g. "USDT0"
    * @param direction: "in" pays `coin` for VUSD, "out" pays VUSD for `coin`
    * @param amount: raw units of what is paid
+   * @param accountObj (optional): pay a partner's fee rates. Quote it with the
+   * account's address as `quotePsmSwap`'s `partner`, or the quote will not
+   * match.
    * @returns Transaction
    */
   async buildPsmSwapTransaction(inputs: {
@@ -2125,23 +2181,24 @@ export class VirtueClient {
     const { coin, direction, amount, accountObj, keepTransaction } = inputs;
     if (!keepTransaction) this.resetTransaction();
     if (this.sender === DUMMY_ADDRESS) throw new Error("Sender is not set");
-    this.transaction.setSender(this.sender);
+    if (!/^\d+$/.test(amount) || BigInt(amount) === 0n) {
+      throw new Error("Swap amount must be a positive integer of raw units");
+    }
     const { coinType } = this.psmPool(coin);
+    this.transaction.setSender(this.sender);
+    // The coin split is the step that can fail (reads, balance), so it goes
+    // first: a failure then leaves nothing half-written in a kept transaction.
+    const [inputCoin] =
+      direction === "in"
+        ? await this.splitCoinsByType(coinType, amount)
+        : await this.splitCoinsByType(this.config.COIN_TYPES.VUSD, amount);
     const accountRequest = accountObj
       ? this.newAccountRequest(accountObj)
       : undefined;
     const output =
       direction === "in"
-        ? this.psmSwapIn({
-            coin,
-            assetCoin: (await this.splitCoinsByType(coinType, amount))[0],
-            accountRequest,
-          })
-        : this.psmSwapOut({
-            coin,
-            vusdCoin: (await this.splitInputCoins("VUSD", amount))[0],
-            accountRequest,
-          });
+        ? this.psmSwapIn({ coin, assetCoin: inputCoin, accountRequest })
+        : this.psmSwapOut({ coin, vusdCoin: inputCoin, accountRequest });
     this.transaction.transferObjects([output], this.sender);
     const tx = this.getTransaction();
     if (!keepTransaction) this.resetTransaction();

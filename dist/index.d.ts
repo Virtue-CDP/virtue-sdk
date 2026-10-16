@@ -119,13 +119,24 @@ type PsmPoolInfo = {
     balance: string;
     /** VUSD minted through this pool and not yet burned back. */
     vusdSupply: string;
+    /** Default fee rates, paid by any swap without a partner `AccountRequest`. */
     swapInFeeRate: number;
     swapOutFeeRate: number;
+    /** Fee rates for partners, keyed by their normalized `AccountRequest` address. */
+    partnerFeeRates: Record<string, {
+        swapInFeeRate: number;
+        swapOutFeeRate: number;
+    }>;
     /**
      * VUSD the PSM module may still mint (`limit - supply` on the treasury),
      * shared by every PSM pool. A swap in that would mint past it aborts.
      */
     mintableVusd: string;
+    /**
+     * VUSD the PSM module has minted and not burned, across every PSM pool. A
+     * swap out burns against it first, so it caps a swap out too.
+     */
+    moduleVusdSupply: string;
 };
 type PsmPoolInfoList = Partial<Record<PSM_COIN, PsmPoolInfo>>;
 
@@ -329,7 +340,9 @@ declare class VirtueClient {
     splitInputCoins(coinSymbol: COIN, ...amounts: (string | TransactionArgument)[]): Promise<TransactionResult>;
     /**
      * @description split the needed coins of any non-IOTA coin type, merging the
-     * sender's coins of that type first
+     * sender's coins of that type first. Everything that can fail (the coin
+     * reads, the balance check) runs before anything is written, since a
+     * `Transaction` cannot be rolled back.
      */
     splitCoinsByType(coinType: string, ...amounts: (string | TransactionArgument)[]): Promise<TransactionResult>;
     /**
@@ -750,6 +763,9 @@ declare class VirtueClient {
      * @param coin: the PSM stablecoin, e.g. "USDT0"
      * @param direction: "in" pays `coin` for VUSD, "out" pays VUSD for `coin`
      * @param amount: raw units of what is paid
+     * @param accountObj (optional): pay a partner's fee rates. Quote it with the
+     * account's address as `quotePsmSwap`'s `partner`, or the quote will not
+     * match.
      * @returns Transaction
      */
     buildPsmSwapTransaction(inputs: {
@@ -788,8 +804,9 @@ declare const parseVaultObject: (coinSymbol: COLLATERAL_COIN, fields: VaultRespo
 type PsmSwapDirection = "in" | "out";
 /**
  * Why the chain would refuse a swap: a swap in that mints past the PSM's VUSD
- * supply limit, or a swap out larger than the pool's coin balance or the VUSD
- * minted through it (the treasury's burn or the pool's `EPoolNotEnough` aborts).
+ * supply limit, or a swap out larger than the pool's coin balance, the VUSD
+ * minted through this pool, or the VUSD the PSM module has outstanding across
+ * all its pools (the treasury's burn or the pool's `EPoolNotEnough` aborts).
  */
 type PsmQuoteError = "SUPPLY_LIMIT" | "POOL_NOT_ENOUGH";
 type PsmQuote = {
@@ -806,13 +823,16 @@ type PsmQuote = {
  * The exact result of `pool::swap_in` / `pool::swap_out` for `amountIn` raw
  * units, with the chain's rounding: the converted amount is floored and the
  * fee, taken from the output, is rounded up.
+ * @param partner (optional) the address of the partner `AccountRequest` the
+ * swap carries (see `buildPsmSwapTransaction`'s `accountObj`). Without it the
+ * quote uses the default fee rates, as the chain does for a swap with none.
  */
-declare const quotePsmSwap: (pool: PsmPoolInfo, direction: PsmSwapDirection, amountIn: bigint) => PsmQuote;
+declare const quotePsmSwap: (pool: PsmPoolInfo, direction: PsmSwapDirection, amountIn: bigint, partner?: string) => PsmQuote;
 /**
  * The smallest input whose swap pays out at least `amountOut` raw units, for
  * a form where the user types what they want to receive. Rounding makes the
  * output a step function of the input, so this searches rather than inverts.
  */
-declare const quotePsmSwapExactOut: (pool: PsmPoolInfo, direction: PsmSwapDirection, amountOut: bigint) => PsmQuote;
+declare const quotePsmSwapExactOut: (pool: PsmPoolInfo, direction: PsmSwapDirection, amountOut: bigint, partner?: string) => PsmQuote;
 
 export { type COIN, COIN_DECIMALS, type COLLATERAL_COIN, CONFIG, type CdpPositionsResponse, type ConfigType, DEFAULT_LAZER_ENDPOINTS, type Double, type Float, type IotaObjectDataWithContent, LAZER_PROPERTIES, ObjectContentFields, type PSM_COIN, type PoolPositionsResponse, type PositionInfo, type PsmPoolInfo, type PsmPoolInfoList, type PsmPoolObjectInfo, type PsmQuote, type PsmQuoteError, type PsmSwapDirection, type PythLazerAccess, type Rewarder, type RewarderInfo, type Rewards, type SharedObjectRef, type StabilityPoolBalances, type StabilityPoolInfo, U64FromBytes, type VaultInfo, type VaultInfoList, type VaultObjectInfo, type VaultResponse, VirtueClient, formatBigInt, formatUnits, getCoinSymbol, getCoinType, getIotaObjectData, getMoveObject, getObjectFields, getObjectGenerics, getObjectNames, parseUnits, parseVaultObject, quotePsmSwap, quotePsmSwapExactOut };
