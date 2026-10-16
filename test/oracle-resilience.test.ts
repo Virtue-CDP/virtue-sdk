@@ -251,6 +251,20 @@ describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
     );
   }, 90_000);
 
+  it("throws for an unreachable RPC even when one update is missing", async () => {
+    // iBTC has no update, so its inspection never reaches the RPC; that must
+    // not mask the other three failing on transport.
+    failFeed(1);
+    const client = new VirtueClient({ pythLazer });
+    vi.spyOn(
+      client.getIotaClient(),
+      "devInspectTransactionBlock",
+    ).mockRejectedValue(new Error("ECONNRESET"));
+    await expect(client.getCollateralPrices()).rejects.toThrow(
+      /transport failure, not an oracle one/,
+    );
+  }, 90_000);
+
   it("falls back to the next endpoint when one is down", async () => {
     const client = new VirtueClient({
       pythLazer: {

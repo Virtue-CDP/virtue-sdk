@@ -209,9 +209,9 @@ declare class VirtueClient {
      * available right now", never as zero.
      *
      * A symbol whose inspection could not be performed at all (an RPC failure) is
-     * left out the same way, as in `aggregatePrices`. If *every* inspection
-     * failed that way the RPC is unreachable, and that is thrown rather than
-     * reported as an empty set of prices.
+     * left out the same way, as in `aggregatePrices`. If every inspection that
+     * actually reached the RPC failed that way, the RPC is unreachable, and that
+     * is thrown rather than reported as an empty set of prices.
      */
     getCollateralPrices(): Promise<Partial<Record<COLLATERAL_COIN, number>>>;
     /**

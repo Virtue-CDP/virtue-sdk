@@ -524,9 +524,9 @@ var VirtueClient = class {
    * available right now", never as zero.
    *
    * A symbol whose inspection could not be performed at all (an RPC failure) is
-   * left out the same way, as in `aggregatePrices`. If *every* inspection
-   * failed that way the RPC is unreachable, and that is thrown rather than
-   * reported as an empty set of prices.
+   * left out the same way, as in `aggregatePrices`. If every inspection that
+   * actually reached the RPC failed that way, the RPC is unreachable, and that
+   * is thrown rather than reported as an empty set of prices.
    */
   async getCollateralPrices() {
     const prepared = await this.prepareOracleUpdates();
@@ -536,7 +536,10 @@ var VirtueClient = class {
       symbols.map((symbol) => this.inspectAggregation(prepared, [symbol]))
     );
     const rejected = settled.filter((r) => r.status === "rejected");
-    if (symbols.length > 0 && rejected.length === symbols.length) {
+    const reached = settled.filter(
+      (r) => r.status === "fulfilled" && r.value !== null
+    );
+    if (rejected.length > 0 && reached.length === 0) {
       throw new Error(
         "Could not read collateral prices: no RPC dev-inspection could be performed. This is a transport failure, not an oracle one.",
         { cause: rejected[0].reason }
