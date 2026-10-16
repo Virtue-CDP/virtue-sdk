@@ -72,7 +72,10 @@ export type ConfigType = {
    * there rather than build a call to nothing.
    */
   PSM_PACKAGE_ID?: string;
-  /** The PSM module's witness type, keying its supply on the treasury. */
+  /**
+   * The PSM module's witness type, keying its supply on the treasury. Must name
+   * the package's original id: a `TypeName` keeps it across upgrades.
+   */
   PSM_WITNESS_TYPE?: string;
   PSM_POOLS?: Partial<Record<PSM_COIN, PsmPoolObjectInfo>>;
 };
