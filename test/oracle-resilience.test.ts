@@ -24,6 +24,21 @@ import { VirtueClient } from "../src/index";
  */
 const LAZER_TOKEN = process.env.PYTH_LAZER_TOKEN;
 
+/**
+ * Runs without a token on purpose: it is the no-access path, and that is the
+ * environment where a regression (a 401 starting to throw) would show up.
+ */
+describe("oracle source without Lazer access", () => {
+  it("reports no price rather than throwing without Lazer access", async () => {
+    // No token: Lazer answers 401, which must read as "no price".
+    const client = new VirtueClient({});
+    await expect(client.aggregatePrices()).resolves.toBeDefined();
+    const prices = await client.getCollateralPrices();
+    expect(prices.IOTA).toBeUndefined();
+    expect(prices.iBTC).toBeUndefined();
+  }, 90_000);
+});
+
 describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
   const realFetch = globalThis.fetch;
   afterEach(() => {
@@ -91,22 +106,21 @@ describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
     await client.aggregatePrices();
     const calls = moveCallsOf(client.getTransaction());
     // Lazer stores nothing on chain: `feed` reads the `Update` the verify call
-    // returned, so the verify has to come first. One update serves every feed.
-    expect(
-      calls.filter((c) => c === "pyth_lazer::parse_and_verify_le_ecdsa_update"),
-    ).toHaveLength(1);
+    // returned, so each feed's verify has to come right before it. IOTA and
+    // iBTC each carry their own update.
+    const verify = "pyth_lazer::parse_and_verify_le_ecdsa_update";
+    expect(calls.filter((c) => c === verify)).toHaveLength(2);
     expect(calls.filter((c) => c === "pyth_lazer_rule::feed")).toHaveLength(2);
+    calls.forEach((c, i) => {
+      if (c === "pyth_lazer_rule::feed") {
+        expect(calls.slice(0, i).lastIndexOf(verify)).toBeGreaterThan(
+          calls.slice(0, i).lastIndexOf("pyth_lazer_rule::feed"),
+        );
+      }
+    });
     expect(
       calls.indexOf("pyth_lazer::parse_and_verify_le_ecdsa_update"),
     ).toBeLessThan(calls.indexOf("pyth_lazer_rule::feed"));
-  }, 90_000);
-
-  it("reports no price rather than throwing without Lazer access", async () => {
-    // No token: Lazer answers 401, which must read as "no price".
-    const client = new VirtueClient({});
-    await expect(client.aggregatePrices()).resolves.toBeDefined();
-    const prices = await client.getCollateralPrices();
-    expect(prices.IOTA).toBeUndefined();
   }, 90_000);
 
   it.each(["reject", "garbage", "http500"] as const)(
@@ -140,6 +154,66 @@ describe.skipIf(!LAZER_TOKEN)("oracle source resilience", () => {
     const calls = moveCallsOf(client.getTransaction());
     expect(calls).not.toContain("pyth_lazer::parse_and_verify_le_ecdsa_update");
     expect(calls).not.toContain("aggregater::aggregate");
+  }, 90_000);
+
+  /** Request bodies name their feed ids, which is what tells the groups apart. */
+  const failFeed = (feedId: number) => {
+    globalThis.fetch = (async (input: any, init?: any) => {
+      if (isLazer(input)) {
+        const ids = JSON.parse(String(init?.body ?? "{}")).priceFeedIds ?? [];
+        if (ids.includes(feedId)) throw new TypeError("fetch failed");
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+  };
+
+  it("keeps IOTA priced when iBTC cannot be", async () => {
+    failFeed(1);
+    const client = new VirtueClient({ pythLazer });
+    const prices = await client.getCollateralPrices();
+    expect(prices.iBTC).toBeUndefined();
+    expect(prices.IOTA).toBeGreaterThan(0);
+    expect(prices.stIOTA).toBeGreaterThan(0);
+  }, 90_000);
+
+  it("keeps iBTC priced when IOTA cannot be", async () => {
+    failFeed(70);
+    const client = new VirtueClient({ pythLazer });
+    const prices = await client.getCollateralPrices();
+    expect(prices.IOTA).toBeUndefined();
+    expect(prices.vIOTA).toBeUndefined();
+    expect(prices.iBTC).toBeGreaterThan(0);
+  }, 90_000);
+
+  it("falls back to the next endpoint when one is down", async () => {
+    const client = new VirtueClient({
+      pythLazer: {
+        apiKey: LAZER_TOKEN,
+        endpoint: ["https://lazer.invalid", "https://pyth-lazer-0.dourolabs.app"],
+      },
+    });
+    const prices = await client.getCollateralPrices();
+    expect(prices.IOTA).toBeGreaterThan(0);
+  }, 90_000);
+
+  it("writes only the price a position needs", async () => {
+    const client = new VirtueClient({ sender: WALLET, pythLazer });
+    const tx = await client.buildManagePositionTransaction({
+      collateralSymbol: "IOTA",
+      depositAmount: "0",
+      borrowAmount: "10000",
+      repaymentAmount: "0",
+      withdrawAmount: "0",
+    });
+    const typeArgs = (tx.getData().commands as any[]).flatMap(
+      (c) => c.MoveCall?.typeArguments ?? [],
+    );
+    // Nothing of iBTC's, and none of the derived IOTA chains either.
+    expect(typeArgs.some((t: string) => t.includes("::ibtc::IBTC"))).toBe(false);
+    const calls = moveCallsOf(tx);
+    expect(calls).not.toContain("cert_rule::feed");
+    expect(calls).not.toContain("vcert_rule::feed");
+    expect(calls).toContain("pyth_lazer_rule::feed");
   }, 90_000);
 
   it("omits collaterals it cannot price rather than reporting them as zero", async () => {

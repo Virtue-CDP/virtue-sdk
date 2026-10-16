@@ -164,8 +164,11 @@ declare const CONFIG: Record<"mainnet" | "testnet", ConfigType>;
 type PythLazerAccess = {
     /** Sent as `Authorization: Bearer <apiKey>` when given. */
     apiKey?: string;
-    /** Base URL serving `POST /v1/latest_price`. Defaults to Pyth's own API. */
-    endpoint?: string;
+    /**
+     * Base URL(s) serving `POST /v1/latest_price`, tried in order until one
+     * returns an update. Defaults to Pyth's own hosts.
+     */
+    endpoint?: string | string[];
 };
 declare class VirtueClient {
     /**
@@ -195,10 +198,13 @@ declare class VirtueClient {
      * @description Price every collateral by dry-running `aggregatePrices` and
      * reading the emitted `PriceAggregated` events.
      *
-     * A symbol is **absent** from the result when no oracle rule could price it —
-     * `aggregatePrices` leaves such a symbol out of the transaction, so it emits
-     * no event, and the derived symbols go with it since they are computed from
-     * the IOTA price. The return type is `Partial` to say so; treat a missing
+     * Each price group (a basic symbol and the symbols derived from it) is
+     * inspected on its own, so iBTC failing to price cannot hide the IOTA prices
+     * or the reverse.
+     *
+     * A symbol is **absent** from the result when no oracle rule could price it,
+     * and the derived symbols go with it since they are computed from the IOTA
+     * price. The return type is `Partial` to say so; treat a missing
      * entry as "no price available right now", never as zero.
      */
     getCollateralPrices(): Promise<Partial<Record<COLLATERAL_COIN, number>>>;
@@ -299,8 +305,17 @@ declare class VirtueClient {
      * again. Probing and refetching would leave a window where the preflight
      * passes and the real fetch fails, throwing only after the transaction had
      * been written to — and it would pay for the same work twice.
+     *
+     * Each basic symbol gets its own Lazer request. Lazer rejects a whole request
+     * when any one feed in it is not entitled, so a shared request would let one
+     * feed's entitlement decide every price.
      */
     private prepareOracleUpdates;
+    /**
+     * @description The price groups: each basic symbol with the configured
+     * symbols derived from it. A group is priced, probed and fails as a unit.
+     */
+    private priceGroups;
     /**
      * @description Whether the Lazer rule is wired up for a symbol at all.
      *
@@ -313,6 +328,20 @@ declare class VirtueClient {
      */
     private lazerRuleFeeds;
     /**
+     * @description Build the aggregation for `symbols` on a transaction of its own
+     * and dev-inspect it. Returns `null` when the prepared data cannot even build
+     * a price for every symbol asked about (nothing to inspect).
+     *
+     * Built on a transaction of its own. Assigning a scratch transaction to
+     * `this.transaction` for the duration would expose it through
+     * `getTransaction()` and, worse, let a concurrent build or
+     * `resetTransaction()` land in that window only to be overwritten when this
+     * restored the old one.
+     *
+     * Transport failures propagate; callers decide what they mean.
+     */
+    private inspectAggregation;
+    /**
      * @description Whether the prepared data can actually price this collateral.
      *
      * Answered by building the aggregation and dev-inspecting it, rather than by
@@ -322,17 +351,12 @@ declare class VirtueClient {
      * wider than the rule's gate, makes the rule abstain, `aggregate` fails its
      * threshold with `err_total_weight_not_enough`, and a predicate that had said
      * "yes" would already have written a doomed position onto the caller's
-     * transaction.
+     * transaction. The same inspection runs the on-chain verify, so an update the
+     * verifier rejects is caught here too.
      *
      * Running the real thing also covers what a predicate would miss: a rule
      * config drifted from the coin types asked about, or any future rule with its
      * own abort conditions.
-     *
-     * Built on a transaction of its own. Assigning a scratch transaction to
-     * `this.transaction` for the duration would expose it through
-     * `getTransaction()` and, worse, let a concurrent build or
-     * `resetTransaction()` land in that window only to be overwritten when this
-     * restored the old one.
      *
      * A dev-inspection that *executes* and reports failure means no rule can
      * price this collateral. A dev-inspection that could not run at all means
@@ -341,22 +365,21 @@ declare class VirtueClient {
      */
     private canPriceCollateral;
     /**
-     * @description Fetch one signed Lazer update for `feedIds` and keep it only if
-     * it verifies on chain, without touching the current transaction.
+     * @description Fetch one signed Lazer update for `feedId`, without touching
+     * the current transaction.
      *
      * Lazer is pull-based: nothing is stored on chain, so the signed update has to
      * travel in the same PTB as the read, through
-     * `pyth_lazer::parse_and_verify_le_ecdsa_update`. One update carries every
-     * requested feed, so one signature check covers all of them.
+     * `pyth_lazer::parse_and_verify_le_ecdsa_update`.
      *
-     * The update is dev-inspected through the verifier before it is kept. A PTB is
-     * all-or-nothing, so an update the verifier rejects — a proxy returning the
-     * wrong bytes, a signer Pyth has rotated out — would otherwise take the entire
-     * price read, and whatever borrow or liquidation is bundled with it, down too.
+     * No on-chain check happens here. Whether the update verifies and prices is
+     * settled by the single dev-inspection of the real aggregation that every
+     * caller runs anyway, which includes the verify; probing the verify alone
+     * first would only spend time inside the rule's freshness window.
      *
-     * Never throws: no access configured, an endpoint outage, a slow or
-     * unauthorised response, malformed bytes or an RPC failure all come back
-     * `null`, which the caller reads as "no price".
+     * Endpoints are tried in order. Never throws: no access configured, an
+     * endpoint outage, a slow or unauthorised response or malformed bytes all
+     * move on to the next endpoint, and come back `null` when none answered.
      */
     private prepareLazer;
     /**
@@ -371,19 +394,28 @@ declare class VirtueClient {
     private lazerUpdateFromResponse;
     /**
      * @description Append the Lazer verify call and return the verified `Update`.
-     * Pure — no I/O — so replaying an update that already passed its probe cannot
-     * fail on account of the SDK.
+     * Pure — no I/O.
      */
     private verifyLazerUpdate;
     /**
-     * @description Get a price result
-     * @param collateral coin symbol, e.g "IOTA"
-     * @return [PriceResult]
+     * @description Price every collateral that can be priced right now, into the
+     * current transaction.
+     *
+     * Each price group is dev-inspected first and only groups that price are
+     * added, because a PTB is all-or-nothing: one group's abort would otherwise
+     * take every other price, and whatever the caller bundles with them, down
+     * too. Never throws — a group that cannot be checked is left out.
+     *
+     * @return PriceResult per collateral that could be priced
      */
     aggregatePrices(): Promise<Partial<Record<COLLATERAL_COIN, TransactionResult>>>;
     /**
-     * @description The transaction-building half of `aggregatePrices`, working
-     * only from data already fetched and validated by `prepareOracleUpdates`.
+     * @description The transaction-building half of the price calls, working only
+     * from data already fetched by `prepareOracleUpdates`. Pure — no I/O.
+     *
+     * Builds only what `symbols` need: each requested symbol's basic symbol, then
+     * the requested derived symbols. A borrow against IOTA therefore carries
+     * nothing of iBTC's, and the reverse.
      *
      * Kept separate so a position build can settle whether its collateral is
      * priceable before writing anything, then build from that exact same prepared

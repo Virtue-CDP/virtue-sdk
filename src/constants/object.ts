@@ -409,18 +409,18 @@ export const CONFIG: Record<"mainnet" | "testnet", ConfigType> = {
         },
         rewarders: [],
       },
+      // No iBTC on testnet: empty refs, like vIOTA below. The ids iBTC used to
+      // carry here were mainnet objects, which a testnet RPC cannot resolve.
       iBTC: {
         priceAggregater: {
-          objectId:
-            "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
-          initialSharedVersion: 172291113,
+          objectId: "",
+          initialSharedVersion: 0,
           mutable: false,
         },
         vault: {
-          objectId:
-            "0xcc094d9e3b491b0c943bb18daf07a49bd951f34688f9610d90982de06fc0c5c9",
-          initialSharedVersion: 172291112,
-          mutable: true,
+          objectId: "0",
+          initialSharedVersion: 0,
+          mutable: false,
         },
       },
       vIOTA: {

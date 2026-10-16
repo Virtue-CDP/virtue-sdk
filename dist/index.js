@@ -285,16 +285,18 @@ var CONFIG = {
         },
         rewarders: []
       },
+      // No iBTC on testnet: empty refs, like vIOTA below. The ids iBTC used to
+      // carry here were mainnet objects, which a testnet RPC cannot resolve.
       iBTC: {
         priceAggregater: {
-          objectId: "0x8a00ca5bae51c5d001e92e5b2188b7ec20a1c530aeac327b3ab86049bf9540ed",
-          initialSharedVersion: 172291113,
+          objectId: "",
+          initialSharedVersion: 0,
           mutable: false
         },
         vault: {
-          objectId: "0xcc094d9e3b491b0c943bb18daf07a49bd951f34688f9610d90982de06fc0c5c9",
-          initialSharedVersion: 172291112,
-          mutable: true
+          objectId: "0",
+          initialSharedVersion: 0,
+          mutable: false
         }
       },
       vIOTA: {
@@ -443,7 +445,11 @@ var _bcs = require('@iota/iota-sdk/bcs');
 
 
 var LAZER_FETCH_TIMEOUT_MS = 5e3;
-var DEFAULT_LAZER_ENDPOINT = "https://pyth-lazer-0.dourolabs.app";
+var DEFAULT_LAZER_ENDPOINTS = [
+  "https://pyth-lazer-0.dourolabs.app",
+  "https://pyth-lazer-1.dourolabs.app",
+  "https://pyth-lazer-2.dourolabs.app"
+];
 var LAZER_PROPERTIES = [
   "price",
   "exponent",
@@ -452,6 +458,11 @@ var LAZER_PROPERTIES = [
   "marketSession"
 ];
 var BASIC_PRICE_SYMBOLS = ["IOTA", "iBTC"];
+var DERIVED_FROM = {
+  stIOTA: "IOTA",
+  vIOTA: "IOTA"
+};
+var basicSymbolOf = (symbol) => _nullishCoalesce(DERIVED_FROM[symbol], () => ( symbol));
 var getCoinSymbol2 = (coinType, coinTypes) => {
   const coin = Object.keys(coinTypes).find(
     (key) => coinTypes[key] === coinType
@@ -502,39 +513,38 @@ var VirtueClient = class {
    * @description Price every collateral by dry-running `aggregatePrices` and
    * reading the emitted `PriceAggregated` events.
    *
-   * A symbol is **absent** from the result when no oracle rule could price it —
-   * `aggregatePrices` leaves such a symbol out of the transaction, so it emits
-   * no event, and the derived symbols go with it since they are computed from
-   * the IOTA price. The return type is `Partial` to say so; treat a missing
+   * Each price group (a basic symbol and the symbols derived from it) is
+   * inspected on its own, so iBTC failing to price cannot hide the IOTA prices
+   * or the reverse.
+   *
+   * A symbol is **absent** from the result when no oracle rule could price it,
+   * and the derived symbols go with it since they are computed from the IOTA
+   * price. The return type is `Partial` to say so; treat a missing
    * entry as "no price available right now", never as zero.
    */
   async getCollateralPrices() {
-    this.resetTransaction();
-    await this.aggregatePrices();
-    this.transaction.setSender(DUMMY_ADDRESS);
-    const inspectRes = await this.iotaClient.devInspectTransactionBlock({
-      sender: DUMMY_ADDRESS,
-      transactionBlock: this.transaction
-    });
-    this.resetTransaction();
+    const prepared = await this.prepareOracleUpdates();
     const pricePrecision = 10 ** 9;
-    return this.getAllCollateralSymbol().reduce(
-      (result, coinSymbol) => {
-        const coinType = this.config.COIN_TYPES[coinSymbol];
-        const priceEvent = (_nullishCoalesce(inspectRes.events, () => ( []))).findLast(
-          (e) => _utils.normalizeStructTag.call(void 0, e.type).includes(_utils.normalizeStructTag.call(void 0, coinType))
+    const groups = await Promise.all(
+      this.priceGroups().map(async (group) => {
+        const inspect = await this.inspectAggregation(prepared, group);
+        if (!inspect || inspect.effects.status.status !== "success") return {};
+        return group.reduce(
+          (result, coinSymbol) => {
+            const coinType = this.config.COIN_TYPES[coinSymbol];
+            const priceEvent = (_nullishCoalesce(inspect.events, () => ( []))).findLast(
+              (e) => _utils.normalizeStructTag.call(void 0, e.type).includes(_utils.normalizeStructTag.call(void 0, coinType))
+            );
+            return priceEvent ? {
+              ...result,
+              [coinSymbol]: +priceEvent.parsedJson.result / pricePrecision
+            } : result;
+          },
+          {}
         );
-        if (priceEvent) {
-          return {
-            ...result,
-            [coinSymbol]: +priceEvent.parsedJson.result / pricePrecision
-          };
-        } else {
-          return result;
-        }
-      },
-      {}
+      })
     );
+    return Object.assign({}, ...groups);
   }
   /**
    * @description Get all vault objects
@@ -997,10 +1007,38 @@ var VirtueClient = class {
    * again. Probing and refetching would leave a window where the preflight
    * passes and the real fetch fails, throwing only after the transaction had
    * been written to — and it would pay for the same work twice.
+   *
+   * Each basic symbol gets its own Lazer request. Lazer rejects a whole request
+   * when any one feed in it is not entitled, so a shared request would let one
+   * feed's entitlement decide every price.
    */
   async prepareOracleUpdates(basicSymbols = BASIC_PRICE_SYMBOLS) {
-    const feedIds = basicSymbols.filter((symbol) => this.lazerRuleFeeds(symbol)).map((symbol) => this.config.PYTH_LAZER_FEED_IDS[symbol]);
-    return { lazer: await this.prepareLazer(feedIds) };
+    const entries = await Promise.all(
+      basicSymbols.filter((symbol) => this.lazerRuleFeeds(symbol)).map(
+        async (symbol) => [
+          symbol,
+          await this.prepareLazer(this.config.PYTH_LAZER_FEED_IDS[symbol])
+        ]
+      )
+    );
+    const lazer = {};
+    for (const [symbol, update] of entries) {
+      if (update) lazer[symbol] = update;
+    }
+    return { lazer };
+  }
+  /**
+   * @description The price groups: each basic symbol with the configured
+   * symbols derived from it. A group is priced, probed and fails as a unit.
+   */
+  priceGroups() {
+    const symbols = this.getAllCollateralSymbol();
+    return BASIC_PRICE_SYMBOLS.filter((basic) => symbols.includes(basic)).map(
+      (basic) => [
+        basic,
+        ...symbols.filter((symbol) => DERIVED_FROM[symbol] === basic)
+      ]
+    );
   }
   /**
    * @description Whether the Lazer rule is wired up for a symbol at all.
@@ -1016,6 +1054,28 @@ var VirtueClient = class {
     return _optionalChain([this, 'access', _26 => _26.config, 'access', _27 => _27.PYTH_LAZER_FEED_IDS, 'optionalAccess', _28 => _28[symbol]]) !== void 0 && !!this.config.PYTH_LAZER_PACKAGE_ID && !!this.config.PYTH_LAZER_STATE_OBJ && !!this.config.PYTH_LAZER_RULE_PACKAGE_ID && !!this.config.PYTH_LAZER_RULE_CONFIG_OBJ;
   }
   /**
+   * @description Build the aggregation for `symbols` on a transaction of its own
+   * and dev-inspect it. Returns `null` when the prepared data cannot even build
+   * a price for every symbol asked about (nothing to inspect).
+   *
+   * Built on a transaction of its own. Assigning a scratch transaction to
+   * `this.transaction` for the duration would expose it through
+   * `getTransaction()` and, worse, let a concurrent build or
+   * `resetTransaction()` land in that window only to be overwritten when this
+   * restored the old one.
+   *
+   * Transport failures propagate; callers decide what they mean.
+   */
+  async inspectAggregation(prepared, symbols) {
+    const probe = new (0, _transactions.Transaction)();
+    const priceResults = this.aggregatePricesWith(prepared, probe, symbols);
+    if (!symbols.every((symbol) => priceResults[symbol])) return null;
+    return this.iotaClient.devInspectTransactionBlock({
+      sender: DUMMY_ADDRESS,
+      transactionBlock: probe
+    });
+  }
+  /**
    * @description Whether the prepared data can actually price this collateral.
    *
    * Answered by building the aggregation and dev-inspecting it, rather than by
@@ -1025,17 +1085,12 @@ var VirtueClient = class {
    * wider than the rule's gate, makes the rule abstain, `aggregate` fails its
    * threshold with `err_total_weight_not_enough`, and a predicate that had said
    * "yes" would already have written a doomed position onto the caller's
-   * transaction.
+   * transaction. The same inspection runs the on-chain verify, so an update the
+   * verifier rejects is caught here too.
    *
    * Running the real thing also covers what a predicate would miss: a rule
    * config drifted from the coin types asked about, or any future rule with its
    * own abort conditions.
-   *
-   * Built on a transaction of its own. Assigning a scratch transaction to
-   * `this.transaction` for the duration would expose it through
-   * `getTransaction()` and, worse, let a concurrent build or
-   * `resetTransaction()` land in that window only to be overwritten when this
-   * restored the old one.
    *
    * A dev-inspection that *executes* and reports failure means no rule can
    * price this collateral. A dev-inspection that could not run at all means
@@ -1043,80 +1098,67 @@ var VirtueClient = class {
    * into a `false` that would blame the oracles for a throttled RPC.
    */
   async canPriceCollateral(collateralSymbol, prepared) {
-    const probe = new (0, _transactions.Transaction)();
-    const priceResults = await this.aggregatePricesWith(prepared, probe);
-    if (!priceResults[collateralSymbol]) return false;
     let inspect;
     try {
-      inspect = await this.iotaClient.devInspectTransactionBlock({
-        sender: DUMMY_ADDRESS,
-        transactionBlock: probe
-      });
+      inspect = await this.inspectAggregation(prepared, [collateralSymbol]);
     } catch (error) {
       throw new Error(
         `Could not determine whether ${collateralSymbol} is priceable: the RPC dev-inspection could not be performed. This is a transport failure, not an oracle one.`,
         { cause: error }
       );
     }
-    return inspect.effects.status.status === "success";
+    return _optionalChain([inspect, 'optionalAccess', _29 => _29.effects, 'access', _30 => _30.status, 'access', _31 => _31.status]) === "success";
   }
   /**
-   * @description Fetch one signed Lazer update for `feedIds` and keep it only if
-   * it verifies on chain, without touching the current transaction.
+   * @description Fetch one signed Lazer update for `feedId`, without touching
+   * the current transaction.
    *
    * Lazer is pull-based: nothing is stored on chain, so the signed update has to
    * travel in the same PTB as the read, through
-   * `pyth_lazer::parse_and_verify_le_ecdsa_update`. One update carries every
-   * requested feed, so one signature check covers all of them.
+   * `pyth_lazer::parse_and_verify_le_ecdsa_update`.
    *
-   * The update is dev-inspected through the verifier before it is kept. A PTB is
-   * all-or-nothing, so an update the verifier rejects — a proxy returning the
-   * wrong bytes, a signer Pyth has rotated out — would otherwise take the entire
-   * price read, and whatever borrow or liquidation is bundled with it, down too.
+   * No on-chain check happens here. Whether the update verifies and prices is
+   * settled by the single dev-inspection of the real aggregation that every
+   * caller runs anyway, which includes the verify; probing the verify alone
+   * first would only spend time inside the rule's freshness window.
    *
-   * Never throws: no access configured, an endpoint outage, a slow or
-   * unauthorised response, malformed bytes or an RPC failure all come back
-   * `null`, which the caller reads as "no price".
+   * Endpoints are tried in order. Never throws: no access configured, an
+   * endpoint outage, a slow or unauthorised response or malformed bytes all
+   * move on to the next endpoint, and come back `null` when none answered.
    */
-  async prepareLazer(feedIds) {
+  async prepareLazer(feedId) {
     const channel = this.config.PYTH_LAZER_CHANNEL;
-    if (feedIds.length === 0 || !channel) return null;
-    const endpoint = (_nullishCoalesce(this.pythLazer.endpoint, () => ( DEFAULT_LAZER_ENDPOINT))).replace(
-      /\/+$/,
-      ""
-    );
-    try {
-      const headers = {
-        "Content-Type": "application/json"
-      };
-      if (this.pythLazer.apiKey) {
-        headers.Authorization = `Bearer ${this.pythLazer.apiKey}`;
-      }
-      const res = await fetch(`${endpoint}/v1/latest_price`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          priceFeedIds: feedIds,
-          properties: LAZER_PROPERTIES,
-          formats: ["leEcdsa"],
-          jsonBinaryEncoding: "hex",
-          channel
-        }),
-        signal: AbortSignal.timeout(LAZER_FETCH_TIMEOUT_MS)
-      });
-      if (!res.ok) return null;
-      const update = this.lazerUpdateFromResponse(await res.json());
-      if (!update) return null;
-      const probe = new (0, _transactions.Transaction)();
-      this.verifyLazerUpdate(probe, update);
-      const inspect = await this.iotaClient.devInspectTransactionBlock({
-        sender: DUMMY_ADDRESS,
-        transactionBlock: probe
-      });
-      return inspect.effects.status.status === "success" ? update : null;
-    } catch (e2) {
-      return null;
+    if (!channel) return null;
+    const configured = _nullishCoalesce(this.pythLazer.endpoint, () => ( DEFAULT_LAZER_ENDPOINTS));
+    const endpoints = (Array.isArray(configured) ? configured : [configured]).map((endpoint) => endpoint.replace(/\/+$/, ""));
+    const headers = {
+      "Content-Type": "application/json"
+    };
+    if (this.pythLazer.apiKey) {
+      headers.Authorization = `Bearer ${this.pythLazer.apiKey}`;
     }
+    const body = JSON.stringify({
+      priceFeedIds: [feedId],
+      properties: LAZER_PROPERTIES,
+      formats: ["leEcdsa"],
+      jsonBinaryEncoding: "hex",
+      channel
+    });
+    for (const endpoint of endpoints) {
+      try {
+        const res = await fetch(`${endpoint}/v1/latest_price`, {
+          method: "POST",
+          headers,
+          body,
+          signal: AbortSignal.timeout(LAZER_FETCH_TIMEOUT_MS)
+        });
+        if (!res.ok) continue;
+        const update = this.lazerUpdateFromResponse(await res.json());
+        if (update) return update;
+      } catch (e2) {
+      }
+    }
+    return null;
   }
   /**
    * @description Pull the signed `leEcdsa` bytes out of a `/v1/latest_price`
@@ -1128,7 +1170,7 @@ var VirtueClient = class {
    * dApp consumer. `fromHEX` works in both runtimes.
    */
   lazerUpdateFromResponse(body) {
-    const hex = _optionalChain([body, 'optionalAccess', _29 => _29.leEcdsa, 'optionalAccess', _30 => _30.data]);
+    const hex = _optionalChain([body, 'optionalAccess', _32 => _32.leEcdsa, 'optionalAccess', _33 => _33.data]);
     if (typeof hex !== "string" || hex.length === 0) return null;
     try {
       return _utils.fromHEX.call(void 0, hex);
@@ -1138,8 +1180,7 @@ var VirtueClient = class {
   }
   /**
    * @description Append the Lazer verify call and return the verified `Update`.
-   * Pure — no I/O — so replaying an update that already passed its probe cannot
-   * fail on account of the SDK.
+   * Pure — no I/O.
    */
   verifyLazerUpdate(tx, update) {
     return tx.moveCall({
@@ -1152,91 +1193,120 @@ var VirtueClient = class {
     });
   }
   /**
-   * @description Get a price result
-   * @param collateral coin symbol, e.g "IOTA"
-   * @return [PriceResult]
+   * @description Price every collateral that can be priced right now, into the
+   * current transaction.
+   *
+   * Each price group is dev-inspected first and only groups that price are
+   * added, because a PTB is all-or-nothing: one group's abort would otherwise
+   * take every other price, and whatever the caller bundles with them, down
+   * too. Never throws — a group that cannot be checked is left out.
+   *
+   * @return PriceResult per collateral that could be priced
    */
   async aggregatePrices() {
-    return this.aggregatePricesWith(await this.prepareOracleUpdates());
+    const prepared = await this.prepareOracleUpdates();
+    const verdicts = await Promise.all(
+      this.priceGroups().map(async (group) => {
+        try {
+          const inspect = await this.inspectAggregation(prepared, group);
+          return _optionalChain([inspect, 'optionalAccess', _34 => _34.effects, 'access', _35 => _35.status, 'access', _36 => _36.status]) === "success" ? group : [];
+        } catch (e4) {
+          return [];
+        }
+      })
+    );
+    return this.aggregatePricesWith(
+      prepared,
+      this.transaction,
+      verdicts.flat()
+    );
   }
   /**
-   * @description The transaction-building half of `aggregatePrices`, working
-   * only from data already fetched and validated by `prepareOracleUpdates`.
+   * @description The transaction-building half of the price calls, working only
+   * from data already fetched by `prepareOracleUpdates`. Pure — no I/O.
+   *
+   * Builds only what `symbols` need: each requested symbol's basic symbol, then
+   * the requested derived symbols. A borrow against IOTA therefore carries
+   * nothing of iBTC's, and the reverse.
    *
    * Kept separate so a position build can settle whether its collateral is
    * priceable before writing anything, then build from that exact same prepared
    * data — no second fetch, and so no window for the answer to change in
    * between.
    */
-  async aggregatePricesWith(prepared, tx = this.transaction) {
-    const basicSymbol = BASIC_PRICE_SYMBOLS;
-    const lazerUpdate = prepared.lazer ? this.verifyLazerUpdate(tx, prepared.lazer) : void 0;
-    const basicPriceResults = basicSymbol.reduce(
-      (result, symbol) => {
-        const coinType = this.config.COIN_TYPES[symbol];
-        if (!lazerUpdate || !this.lazerRuleFeeds(symbol)) return result;
-        const collector = this.newPriceCollector(symbol, tx);
-        tx.moveCall({
-          target: `${this.config.PYTH_LAZER_RULE_PACKAGE_ID}::pyth_lazer_rule::feed`,
-          typeArguments: [coinType],
-          arguments: [
-            collector,
-            tx.sharedObjectRef(this.config.PYTH_LAZER_RULE_CONFIG_OBJ),
-            tx.object.clock(),
-            lazerUpdate
-          ]
-        });
-        const priceResult = tx.moveCall({
-          target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
-          typeArguments: [coinType],
-          arguments: [
-            tx.sharedObjectRef(this.config.VAULT_MAP[symbol].priceAggregater),
-            collector
-          ]
-        });
-        return { ...result, [symbol]: priceResult };
-      },
-      {}
+  aggregatePricesWith(prepared, tx, symbols) {
+    const basics = BASIC_PRICE_SYMBOLS.filter(
+      (basic) => symbols.some((symbol) => basicSymbolOf(symbol) === basic)
     );
-    if (!basicPriceResults.IOTA) return basicPriceResults;
-    const iotaPriceResult = basicPriceResults.IOTA;
-    const stIotaCollector = this.newPriceCollector("stIOTA", tx);
-    tx.moveCall({
-      target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
-      arguments: [
-        stIotaCollector,
-        iotaPriceResult,
-        tx.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
-        tx.sharedObjectRef(this.config.CERT_METADATA_OBJ)
-      ]
-    });
-    const stIotaPrice = tx.moveCall({
-      target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
-      typeArguments: [this.config.COIN_TYPES.stIOTA],
-      arguments: [
-        tx.sharedObjectRef(this.config.VAULT_MAP.stIOTA.priceAggregater),
-        stIotaCollector
-      ]
-    });
-    const vIotaCollector = this.newPriceCollector("vIOTA", tx);
-    tx.moveCall({
-      target: `${this.config.VCERT_RULE_PACKAGE_ID}::vcert_rule::feed`,
-      arguments: [
-        vIotaCollector,
-        iotaPriceResult,
-        tx.sharedObjectRef(this.config.VCERT_NATIVE_POOL_OBJ),
-        tx.sharedObjectRef(this.config.VCERT_METADATA_OBJ)
-      ]
-    });
-    const vIotaPrice = tx.moveCall({
-      target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
-      typeArguments: [this.config.COIN_TYPES.vIOTA],
-      arguments: [
-        tx.sharedObjectRef(this.config.VAULT_MAP.vIOTA.priceAggregater),
-        vIotaCollector
-      ]
-    });
-    return { ...basicPriceResults, stIOTA: stIotaPrice, vIOTA: vIotaPrice };
+    const results = {};
+    for (const symbol of basics) {
+      const update = prepared.lazer[symbol];
+      if (!update || !this.lazerRuleFeeds(symbol)) continue;
+      const coinType = this.config.COIN_TYPES[symbol];
+      const lazerUpdate = this.verifyLazerUpdate(tx, update);
+      const collector = this.newPriceCollector(symbol, tx);
+      tx.moveCall({
+        target: `${this.config.PYTH_LAZER_RULE_PACKAGE_ID}::pyth_lazer_rule::feed`,
+        typeArguments: [coinType],
+        arguments: [
+          collector,
+          tx.sharedObjectRef(this.config.PYTH_LAZER_RULE_CONFIG_OBJ),
+          tx.object.clock(),
+          lazerUpdate
+        ]
+      });
+      results[symbol] = tx.moveCall({
+        target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+        typeArguments: [coinType],
+        arguments: [
+          tx.sharedObjectRef(this.config.VAULT_MAP[symbol].priceAggregater),
+          collector
+        ]
+      });
+    }
+    const iotaPriceResult = results.IOTA;
+    if (!iotaPriceResult) return results;
+    if (symbols.includes("stIOTA")) {
+      const stIotaCollector = this.newPriceCollector("stIOTA", tx);
+      tx.moveCall({
+        target: `${this.config.CERT_RULE_PACKAGE_ID}::cert_rule::feed`,
+        arguments: [
+          stIotaCollector,
+          iotaPriceResult,
+          tx.sharedObjectRef(this.config.CERT_NATIVE_POOL_OBJ),
+          tx.sharedObjectRef(this.config.CERT_METADATA_OBJ)
+        ]
+      });
+      results.stIOTA = tx.moveCall({
+        target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+        typeArguments: [this.config.COIN_TYPES.stIOTA],
+        arguments: [
+          tx.sharedObjectRef(this.config.VAULT_MAP.stIOTA.priceAggregater),
+          stIotaCollector
+        ]
+      });
+    }
+    if (symbols.includes("vIOTA")) {
+      const vIotaCollector = this.newPriceCollector("vIOTA", tx);
+      tx.moveCall({
+        target: `${this.config.VCERT_RULE_PACKAGE_ID}::vcert_rule::feed`,
+        arguments: [
+          vIotaCollector,
+          iotaPriceResult,
+          tx.sharedObjectRef(this.config.VCERT_NATIVE_POOL_OBJ),
+          tx.sharedObjectRef(this.config.VCERT_METADATA_OBJ)
+        ]
+      });
+      results.vIOTA = tx.moveCall({
+        target: `${this.config.ORACLE_PACKAGE_ID}::aggregater::aggregate`,
+        typeArguments: [this.config.COIN_TYPES.vIOTA],
+        arguments: [
+          tx.sharedObjectRef(this.config.VAULT_MAP.vIOTA.priceAggregater),
+          vIotaCollector
+        ]
+      });
+    }
+    return results;
   }
   /**
    * @description Get a request to Mange Position
@@ -1516,7 +1586,9 @@ var VirtueClient = class {
     if (!this.sender) throw new Error("Sender is not set");
     let prepared;
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      prepared = await this.prepareOracleUpdates();
+      prepared = await this.prepareOracleUpdates([
+        basicSymbolOf(collateralSymbol)
+      ]);
       if (!await this.canPriceCollateral(collateralSymbol, prepared)) {
         throw new Error(
           `No oracle rule could price ${collateralSymbol}: borrowing and withdrawing require a price.`
@@ -1547,8 +1619,10 @@ var VirtueClient = class {
     );
     const [repaymentCoin] = await this.splitInputCoins("VUSD", repaymentAmount);
     if (Number(borrowAmount) > 0 || Number(withdrawAmount) > 0) {
-      const priceResults = await this.aggregatePricesWith(
-        await _asyncNullishCoalesce(prepared, async () => ( await this.prepareOracleUpdates()))
+      const priceResults = this.aggregatePricesWith(
+        await _asyncNullishCoalesce(prepared, async () => ( await this.prepareOracleUpdates([basicSymbolOf(collateralSymbol)]))),
+        this.transaction,
+        [collateralSymbol]
       );
       const priceResult = priceResults[collateralSymbol];
       if (!priceResult) {
